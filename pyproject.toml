@@ -1,0 +1,95 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mazinger-dubber"
+version = "0.2.0"
+description = "End-to-end video dubbing pipeline: transcribe, translate, and voice-clone."
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+dependencies = [
+    "yt-dlp>=2024.0",
+    "openai>=1.0",
+    "json-repair>=0.28",
+    "Pillow>=10.0",
+    "soundfile>=0.12",
+    "numpy>=1.24",
+    "tqdm>=4.60",
+]
+
+[project.optional-dependencies]
+# Fast local transcription with faster-whisper (CTranslate2)
+# Compatible with ALL TTS engines (no transformers version conflicts)
+# Recommended for offline/local transcription with Chatterbox TTS.
+transcribe-faster = [
+    "faster-whisper>=1.0",
+]
+# Local transcription with WhisperX (uses transformers>=4.48)
+# NOT compatible with tts-chatterbox due to transformers conflict.
+# For chatterbox environments, use faster-whisper or OpenAI transcription.
+transcribe-whisperx = [
+    "whisperx>=3.0",
+    "torch>=2.0",
+]
+# Alias for backwards compatibility (points to whisperx)
+transcribe = [
+    "mazinger-dubber[transcribe-whisperx]",
+]
+# TTS with Qwen (compatible with transcribe-whisperx and transcribe-faster)
+tts = [
+    "qwen-tts",
+    "torch>=2.0",
+    "soundfile>=0.12",
+]
+# TTS with Chatterbox
+# Use faster-whisper or OpenAI transcription (whisperx has conflicts).
+tts-chatterbox = [
+    "chatterbox-tts",
+    "resemble-perth>=1.0.1",  # Explicit: avoid conflict with unrelated 'perth' package
+    "torch>=2.0",
+    "torchaudio>=2.0",  # Must match torch version
+    "soundfile>=0.12",
+    "numpy>=1.26",  # Override chatterbox-tts pinned version for Python 3.12+
+    "pandas>=2.2",  # Override chatterbox-tts pinned version for Python 3.12+
+    # setuptools<70 removed: pkg_resources is deprecated but still present in setuptools 70+
+]
+# Optional: flash-attn for faster attention (requires CUDA, complex build)
+flash-attn = [
+    "flash-attn>=2.0",
+]
+# Full pipeline with Qwen TTS (transcribe-whisperx + tts work together)
+all-qwen = [
+    "mazinger-dubber[transcribe-whisperx,tts]",
+]
+# Full pipeline with Chatterbox TTS + faster-whisper (fully compatible)
+all-chatterbox = [
+    "mazinger-dubber[transcribe-faster,tts-chatterbox]",
+]
+
+[project.scripts]
+mazinger-dubber = "mazinger_dubber.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+
+# UV-specific overrides for Python 3.12+ / Colab CUDA compatibility
+# chatterbox-tts 0.1.6 hard-pins torch==2.6.0, torchaudio==2.6.0, numpy<1.26,
+# gradio==5.44.1, and safetensors==0.5.3.  On Colab L4 (CUDA 12.8) these
+# cause a multi-GB downgrade that breaks the environment.
+# These overrides tell uv: "accept anything >= these floors" so the already-
+# installed CUDA-optimised builds are reused instead of being replaced.
+[tool.uv]
+override-dependencies = [
+    "numpy>=1.26",         # chatterbox pins numpy<1.26; conflicts with Python 3.12+
+    "pandas>=2.2",         # chatterbox pins old pandas; not needed for inference
+    "torch>=2.0",          # chatterbox pins torch==2.6.0; Colab has 2.10.0+cu128
+    "torchaudio>=2.0",     # chatterbox pins torchaudio==2.6.0; must match torch
+    "gradio>=5.0",         # chatterbox pins gradio==5.44.1 (UI-only); Colab has 5.50+
+    "safetensors>=0.3",    # chatterbox pins safetensors==0.5.3; 0.7+ is backward-compat
+]
+
+# Build dependencies for packages with missing build requirements
+[tool.uv.extra-build-dependencies]
+pkuseg = ["numpy"]
