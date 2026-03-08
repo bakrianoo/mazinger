@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from tqdm.auto import tqdm
 
-from mazinger_dubber.srt import parse_blocks, blocks_to_text
+from mazinger_dubber.srt import parse_blocks, blocks_to_text, format_time
 from mazinger_dubber.utils import make_image_content
 
 if TYPE_CHECKING:
@@ -24,32 +24,51 @@ def _build_system_prompt(keywords: list[str], keypoints: list[str], target_langu
     kp_summary = "; ".join(keypoints[:8])
 
     return f"""\
-You are a professional {target_language} subtitle writer for technical / programming \
-tutorial videos. You are given SRT subtitles, video screenshots, and \
-a keyword/keypoint list. Produce clear, polished, professional {target_language} \
-subtitles -- not a literal word-for-word translation.
+You are a professional {target_language} dubbing script writer for technical / \
+programming tutorial videos. You are given SRT subtitles with duration \
+annotations, video screenshots, and a keyword/keypoint list. Produce natural, \
+well-phrased {target_language} dubbing scripts -- not a literal word-for-word \
+translation, but also NOT a compressed summary.
 
 QUALITY GOALS:
-- The {target_language} must read as if a fluent {target_language}-speaking instructor wrote it.
+- The {target_language} must sound like a fluent {target_language}-speaking instructor \
+  naturally explaining the topic in a friendly, conversational teaching tone.
+- Clean up false starts, unintelligible fragments, and obvious speech errors. \
+  However, PRESERVE the speaker's natural elaboration, rhetorical questions, \
+  examples, and storytelling flow.
+- Do NOT compress or summarize. The translation should convey the SAME level \
+  of detail and explanation as the original.
 - When the transcript is vague, incomplete, or references on-screen visuals, \
   use the screenshots and keypoint context to write a clear {target_language} sentence.
-- Remove filler, false starts, and verbal repetitions while preserving the \
-  speaker's friendly, teaching tone.
-- Prefer concise, active-voice phrasing. Avoid run-on sentences.
+- If the original uses repetition or restates an idea for emphasis, rephrase \
+  it into clean {target_language} that keeps the same emphasis without crude \
+  repetition.
+
+DURATION MATCHING (CRITICAL FOR DUBBING):
+- Each entry includes a [duration: Xs | target: ~N words] annotation.
+- English speech averages ~2.5 words per second. Your translation for each \
+  entry MUST contain approximately the target number of words so the dubbed \
+  audio fills the same time window as the original speech.
+- Example: a [duration: 20.0s | target: ~50 words] entry needs about 50 words.
+- This is the MOST IMPORTANT constraint. Short translations create awkward \
+  silences in the dubbed output. If you find yourself writing significantly \
+  fewer words than the target, expand your phrasing: add natural elaboration, \
+  gentle transitions, or brief clarifications the speaker implied.
+- Do NOT pad with meaningless filler. Every word should contribute to a \
+  natural, fluent delivery.
 
 STRUCTURAL RULES:
 1. Translate EVERY subtitle entry in the MAIN BLOCK. Do NOT skip, merge, \
    split, or reorder entries.
 2. Keep the EXACT SRT index numbers and timestamps -- only replace the \
-   source text with {target_language}.
+   source text with {target_language}. Remove the [duration/target] \
+   annotations from your output.
 3. Preserve these technical terms exactly: {kw_examples}. \
    Use them verbatim when the speaker refers to them.
 4. The video covers: {kp_summary}. Use this to disambiguate unclear references.
-5. Match subtitle length: each entry should have roughly the same character \
-   count (+-20%) as the original so timing stays aligned.
-6. Return ONLY the translated SRT block for the MAIN BLOCK entries -- \
+5. Return ONLY the translated SRT block for the MAIN BLOCK entries -- \
    no fences, no commentary.
-7. Each subtitle entry format:
+6. Each subtitle entry format:
    <index>
    <start> --> <end>
    <translated text>
@@ -58,6 +77,23 @@ STRUCTURAL RULES:
 
 You will receive CONTEXT BEFORE and CONTEXT AFTER sections. They are for \
 reference only -- translate and return ONLY the MAIN BLOCK entries."""
+
+
+# Average English speech rate in words per second (used for duration targeting).
+WORDS_PER_SECOND = 2.5
+
+
+def _blocks_to_annotated_text(blocks: list[tuple[str, float, float, str]]) -> str:
+    """Like ``blocks_to_text`` but adds duration & word-count annotations."""
+    parts: list[str] = []
+    for idx, start, end, text in blocks:
+        dur = end - start
+        target_words = max(1, round(dur * WORDS_PER_SECOND))
+        parts.append(
+            f"{idx}\n{format_time(start)} --> {format_time(end)}\n"
+            f"[duration: {dur:.1f}s | target: ~{target_words} words]\n{text}\n"
+        )
+    return "\n".join(parts)
 
 
 def _find_thumbnails_for_range(
@@ -107,12 +143,13 @@ def _build_messages(
     user_parts.append({
         "type": "text",
         "text": (
-            f"\nTranslate the MAIN BLOCK entries into professional, clear {target_language}. "
-            "Use CONTEXT BEFORE/AFTER for surrounding context but ONLY return "
-            "translations for the MAIN BLOCK. Use the screenshots and context "
-            "to resolve vague or incomplete references.\n"
+            f"\nTranslate the MAIN BLOCK entries into natural, full-length {target_language} "
+            "suitable for dubbing. Use CONTEXT BEFORE/AFTER for surrounding context "
+            "but ONLY return translations for the MAIN BLOCK. Use the screenshots "
+            "and context to resolve vague or incomplete references.\n"
             "Keep index numbers and timestamps EXACTLY as-is. "
-            "Match approximate character length of each original entry.\n\n"
+            "Match the target word count shown in each entry's [duration/target] "
+            "annotation -- this is critical for dubbing timing.\n\n"
             + srt_payload
         ),
     })
@@ -172,7 +209,7 @@ def translate_srt(
         before_blocks = all_blocks[ctx_before_start:core_start]
         after_blocks = all_blocks[core_end:ctx_after_end]
 
-        batch_srt = blocks_to_text(core_blocks)
+        batch_srt = _blocks_to_annotated_text(core_blocks)
         context_before = blocks_to_text(before_blocks) if before_blocks else ""
         context_after = blocks_to_text(after_blocks) if after_blocks else ""
 
