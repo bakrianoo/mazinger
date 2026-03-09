@@ -48,6 +48,13 @@ def describe_content(
     Returns:
         A dict with ``title``, ``summary``, ``keypoints``, and ``keywords``.
     """
+    # Evenly sample thumbnails across the video timeline to stay concise.
+    MAX_IMAGES = 50
+    if len(thumb_paths) > MAX_IMAGES:
+        step = len(thumb_paths) / MAX_IMAGES
+        thumb_paths = [thumb_paths[int(i * step)] for i in range(MAX_IMAGES)]
+        log.info("Sampled %d thumbnails (original count exceeded API limit)", MAX_IMAGES)
+
     user_parts: list[dict] = []
     for tp in thumb_paths:
         user_parts.append({"type": "text", "text": f"[{tp['timestamp']}] {tp['reason']}"})

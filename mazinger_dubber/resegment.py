@@ -113,6 +113,70 @@ def _validate_merge_groups(groups: list, n: int) -> bool:
     return len(seen) == n
 
 
+def _fix_merge_groups(groups: list, n: int) -> list[list[int]] | None:
+    """Try to repair an LLM merge response that is close but invalid.
+
+    Common issues:
+    - Some entry numbers are missing (the LLM skipped them).
+    - Groups are otherwise valid (consecutive, in order, no duplicates).
+
+    Repair strategy: insert any missing entries as singleton groups in the
+    correct position.  Returns *None* if the response is too broken to fix.
+    """
+    if not isinstance(groups, list):
+        return None
+
+    # Normalise: ensure every group is a list of ints, consecutive, in order.
+    normalised: list[list[int]] = []
+    seen: set[int] = set()
+    prev_max = 0
+    for group in groups:
+        if not isinstance(group, list) or not group:
+            return None
+        nums: list[int] = []
+        for idx in group:
+            if not isinstance(idx, (int, float)):
+                return None
+            idx = int(idx)
+            if idx < 1 or idx > n or idx in seen:
+                return None
+            seen.add(idx)
+            nums.append(idx)
+        nums_sorted = sorted(nums)
+        if nums_sorted != list(range(nums_sorted[0], nums_sorted[-1] + 1)):
+            return None
+        if nums_sorted[0] <= prev_max:
+            return None
+        if len(nums_sorted) > _MAX_MERGE_GROUP:
+            return None
+        prev_max = nums_sorted[-1]
+        normalised.append(nums_sorted)
+
+    if not normalised:
+        return None
+
+    # All present already — nothing to fix.
+    if len(seen) == n:
+        return normalised
+
+    # Fill in gaps: insert missing entries as singletons.
+    result: list[list[int]] = []
+    next_expected = 1
+    for group in normalised:
+        # Insert singletons for any entries before this group.
+        while next_expected < group[0]:
+            result.append([next_expected])
+            next_expected += 1
+        result.append(group)
+        next_expected = group[-1] + 1
+    # Trailing entries after the last group.
+    while next_expected <= n:
+        result.append([next_expected])
+        next_expected += 1
+
+    return result
+
+
 def _llm_merge_batch(
     blocks: list[tuple[str, float, float, str]],
     client: OpenAI,
@@ -142,7 +206,17 @@ def _llm_merge_batch(
         groups = json_repair.loads(resp.choices[0].message.content)
         if _validate_merge_groups(groups, len(blocks)):
             return groups
-        log.warning("LLM merge response failed validation – falling back")
+        # Try to repair (e.g. LLM skipped some entries)
+        fixed = _fix_merge_groups(groups, len(blocks))
+        if fixed is not None:
+            log.info("LLM merge response repaired (missing entries filled as singletons)")
+            return fixed
+        log.warning(
+            "LLM merge response failed validation – falling back. "
+            "Expected %d entries, got: %s",
+            len(blocks),
+            resp.choices[0].message.content[:500],
+        )
     except Exception:
         log.warning("LLM merge call failed – falling back", exc_info=True)
     return None
