@@ -72,6 +72,7 @@ def _cmd_dub(args: argparse.Namespace) -> None:
         chatterbox_cfg=args.chatterbox_cfg,
         cookies_from_browser=args.cookies_from_browser,
         cookies=args.cookies,
+        force_reset=args.force_reset,
         use_resegmented=args.use_resegmented,
         output_type=args.output_type,
         tempo_mode="fixed" if args.fixed_tempo else ("dynamic" if args.dynamic_tempo else "off"),
@@ -281,6 +282,7 @@ def _cmd_tts(args: argparse.Namespace) -> None:
     segment_info = tts.synthesize_segments(
         model, voice_prompt, srt_entries, args.segments_dir,
         language=args.language,
+        force_reset=getattr(args, "force_reset", False),
     )
     tts.unload_model(voice_prompt)
 
@@ -377,6 +379,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--duration-budget", type=float, default=None,
         help="Fraction of time window to fill with translated speech, 0.0-1.0 (default: 0.80).",
+    )
+    p.add_argument(
+        "--force-reset", action="store_true",
+        help="Discard all cached/intermediate outputs and re-run every stage from scratch.",
     )
     _add_common_args(p)
 
@@ -509,6 +515,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--max-tempo", type=float, default=1.3,
         help="Maximum speed-up factor for dynamic tempo (default: 1.3).",
+    )
+    p.add_argument(
+        "--force-reset", action="store_true",
+        help="Delete existing TTS segment files and re-synthesise from scratch.",
     )
     _add_common_args(p)
 

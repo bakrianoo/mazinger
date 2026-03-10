@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from tqdm.auto import tqdm
 
 from mazinger_dubber.srt import parse_blocks, blocks_to_text, format_time
-from mazinger_dubber.utils import make_image_content
+from mazinger_dubber.utils import make_image_content, LLMUsageTracker
 
 if TYPE_CHECKING:
     from openai import OpenAI
@@ -192,6 +192,7 @@ def translate_srt(
     overlap_size: int = OVERLAP_SIZE,
     words_per_second: float = WORDS_PER_SECOND,
     duration_budget: float = DURATION_BUDGET,
+    usage_tracker: LLMUsageTracker | None = None,
 ) -> str:
     """Translate an SRT file to the target language using batched LLM calls with visual context.
 
@@ -263,6 +264,8 @@ def translate_srt(
         resp = client.chat.completions.create(
             model=llm_model, temperature=0.3, messages=msgs,
         )
+        if usage_tracker is not None:
+            usage_tracker.record("translate", llm_model, resp)
         translated_batch = resp.choices[0].message.content.strip()
 
         # Filter to only core indices

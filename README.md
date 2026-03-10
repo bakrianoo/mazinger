@@ -17,6 +17,7 @@ Download a video, transcribe it, translate the subtitles, and generate a voice-c
 | **Re-segment** | Split long subtitles into readable caption blocks     |
 | **TTS**        | Voice-cloned speech (Qwen3-TTS or Chatterbox)         |
 | **Assemble**   | Time-aligned final audio matching original duration   |
+| **LLM Usage**  | Per-stage token tracking with summary report          |
 
 Every stage works **independently** or chained through the `MazingerDubber` class / `mazinger-dubber` CLI.
 
@@ -61,6 +62,20 @@ mazinger-dubber dub "https://youtube.com/watch?v=VIDEO_ID" \
 ```
 
 Add `--tts-engine chatterbox` to use Chatterbox instead of Qwen.
+
+### Resuming an interrupted run
+
+By default, every stage caches its outputs. If a run is interrupted (e.g. during TTS), simply re-run the same command — already-completed stages and TTS segments are skipped automatically.
+
+To **discard all cached outputs** and start from scratch, add `--force-reset`:
+
+```bash
+mazinger-dubber dub "https://youtube.com/watch?v=VIDEO_ID" \
+    --clone-profile abubakr \
+    --force-reset
+```
+
+`--force-reset` also works with the standalone `tts` sub-command.
 
 ### Using a voice profile
 
@@ -163,6 +178,9 @@ No. They require different `transformers` versions. Use separate virtual environ
 
 **Where do the output files go?**
 Under `<base-dir>/projects/<slug>/` (default: `./mazinger_dubber_output/projects/<slug>/`) — organised into `source/`, `transcription/`, `subtitles/`, `thumbnails/`, `analysis/`, and `tts/` folders.
+
+**My run was interrupted — do I have to start over?**
+No. Re-run the same command and all completed stages (including individual TTS segments) are skipped automatically. Use `--force-reset` only if you want to regenerate everything from scratch.
 
 **How do I pass YouTube cookies for age-restricted videos?**
 Use `--cookies-from-browser chrome` or `--cookies path/to/cookies.txt` with any command.

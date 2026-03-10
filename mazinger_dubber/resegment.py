@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 import json_repair
 
 from mazinger_dubber.srt import parse_blocks, build
+from mazinger_dubber.utils import LLMUsageTracker
 
 if TYPE_CHECKING:
     from openai import OpenAI
@@ -181,6 +182,7 @@ def _llm_merge_batch(
     blocks: list[tuple[str, float, float, str]],
     client: OpenAI,
     llm_model: str,
+    usage_tracker: LLMUsageTracker | None = None,
 ) -> list[list[int]] | None:
     """Ask the LLM which consecutive entries should be merged."""
     lines = []
@@ -203,6 +205,8 @@ def _llm_merge_batch(
                 },
             ],
         )
+        if usage_tracker is not None:
+            usage_tracker.record("resegment-merge", llm_model, resp)
         groups = json_repair.loads(resp.choices[0].message.content)
         if _validate_merge_groups(groups, len(blocks)):
             return groups
@@ -270,6 +274,7 @@ def _merge_phrases(
     blocks: list[tuple[str, float, float, str]],
     client: OpenAI | None,
     llm_model: str,
+    usage_tracker: LLMUsageTracker | None = None,
 ) -> list[tuple[float, float, str]]:
     """Merge consecutive SRT blocks that belong to the same speech phrase."""
     if not blocks:
@@ -284,7 +289,7 @@ def _merge_phrases(
     for batch_start in range(0, len(blocks), _MERGE_BATCH_SIZE):
         batch = blocks[batch_start : batch_start + _MERGE_BATCH_SIZE]
 
-        groups = _llm_merge_batch(batch, client, llm_model)
+        groups = _llm_merge_batch(batch, client, llm_model, usage_tracker=usage_tracker)
         merge_calls += 1
 
         if groups is None:
@@ -323,7 +328,12 @@ RULES:
 5. Return a JSON array of strings. No markdown fences, no commentary."""
 
 
-def _llm_split(text: str, client: OpenAI, llm_model: str = "gpt-4.1") -> list[str]:
+def _llm_split(
+    text: str,
+    client: OpenAI,
+    llm_model: str = "gpt-4.1",
+    usage_tracker: LLMUsageTracker | None = None,
+) -> list[str]:
     """Use an LLM to split long text into caption-sized pieces."""
     resp = client.chat.completions.create(
         model=llm_model,
@@ -333,6 +343,8 @@ def _llm_split(text: str, client: OpenAI, llm_model: str = "gpt-4.1") -> list[st
             {"role": "user", "content": f"Split this subtitle text:\n\n{text}"},
         ],
     )
+    if usage_tracker is not None:
+        usage_tracker.record("resegment-split", llm_model, resp)
     segments = json_repair.loads(resp.choices[0].message.content)
     return [s.strip() for s in segments if s.strip()]
 
@@ -422,6 +434,7 @@ def resegment_srt(
     llm_model: str = "gpt-4.1",
     max_chars: int = MAX_CHARS,
     max_dur: float = MAX_DUR,
+    usage_tracker: LLMUsageTracker | None = None,
 ) -> str:
     """Re-segment an SRT string so every entry is a complete speech phrase.
 
@@ -438,7 +451,7 @@ def resegment_srt(
     blocks = parse_blocks(srt_text)
 
     # ── Phase 1: merge fragments into complete phrases ────────────────
-    merged = _merge_phrases(blocks, client, llm_model)
+    merged = _merge_phrases(blocks, client, llm_model, usage_tracker=usage_tracker)
 
     # ── Phase 2: split overly-long entries ────────────────────────────
     resegmented: list[tuple[float, float, str]] = []
@@ -459,7 +472,7 @@ def resegment_srt(
         segments: list[str] | None = None
         if client is not None:
             try:
-                segments = _llm_split(text, client, llm_model)
+                segments = _llm_split(text, client, llm_model, usage_tracker=usage_tracker)
                 split_calls += 1
                 joined = " ".join(segments)
                 if joined.replace("  ", " ").strip() != text.replace("  ", " ").strip():

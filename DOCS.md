@@ -422,6 +422,10 @@ from mazinger_dubber.utils import get_audio_duration
 model = tts.load_model(engine="qwen")
 prompt = tts.create_voice_prompt(model, "reference.m4a", ref_text, engine="qwen")
 segments = tts.synthesize_segments(model, prompt, parse_file("translated.srt"), "./segments")
+
+# To discard cached segments and re-generate from scratch:
+# segments = tts.synthesize_segments(model, prompt, parse_file("translated.srt"), "./segments",
+#                                    force_reset=True)
 tts.unload_model(prompt)
 
 # No tempo adjustment (default)
@@ -458,11 +462,12 @@ projects/<slug>/
 │   └── meta.json
 ├── analysis/
 │   └── description.json
-└── tts/
-    ├── segments/
-    │   ├── seg_0001.wav
-    │   └── ...
-    └── dubbed.wav
+├── tts/
+│   ├── segments/
+│   │   ├── seg_0001.wav
+│   │   └── ...
+│   └── dubbed.wav
+└── llm_usage.json
 ```
 
 ---
@@ -476,6 +481,45 @@ projects/<slug>/
 | `OPENAI_MODEL`       | Default LLM model for translation/analysis       |
 
 All settings can also be passed via constructor arguments or CLI flags.
+
+### Caching & Force Reset
+
+By default, every pipeline stage and individual TTS segment is cached. If a run is interrupted, re-running the same command resumes from where it stopped.
+
+| Flag | Effect |
+|------|--------|
+| *(default)* | Skip stages/segments whose output files already exist |
+| `--force-reset` | Discard all cached outputs and re-run every stage from scratch |
+
+`--force-reset` works with both the `dub` and `tts` sub-commands.
+
+### LLM Usage Tracking
+
+Every LLM call (thumbnails, describe, translate, resegment) is automatically tracked. After the pipeline completes, a usage report is logged showing per-stage token counts:
+
+```
+═══ LLM Usage Report ═══
+  thumbnails        model=gpt-4.1                     calls=1  in=   3,420  out=    812
+  describe          model=gpt-4.1                     calls=1  in=  12,105  out=    534
+  translate         model=gpt-4.1                     calls=4  in=  45,230  out=  6,102
+  resegment-merge   model=gpt-4.1                     calls=2  in=   8,400  out=  1,230
+  ────────────────────────────────────────────────────────────────────────────
+  TOTAL                                               calls=8  in=  69,155  out=  8,678
+══════════════════════════
+```
+
+The raw records are also saved to `<project>/llm_usage.json` for programmatic access.
+
+To use the tracker in Python outside the pipeline:
+
+```python
+from mazinger_dubber.utils import LLMUsageTracker
+
+tracker = LLMUsageTracker()
+# Pass tracker to any LLM-calling function:
+translated = translate_srt(srt_text, desc, thumbs, client, usage_tracker=tracker)
+print(tracker.report())
+```
 
 ### Tempo Control
 

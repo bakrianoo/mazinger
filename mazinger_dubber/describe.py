@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 import json_repair
 
-from mazinger_dubber.utils import make_image_content
+from mazinger_dubber.utils import make_image_content, LLMUsageTracker
 
 if TYPE_CHECKING:
     from openai import OpenAI
@@ -35,6 +35,7 @@ def describe_content(
     client: OpenAI,
     *,
     llm_model: str = "gpt-4.1",
+    usage_tracker: LLMUsageTracker | None = None,
 ) -> dict:
     """Send thumbnails and the full SRT to an LLM for content analysis.
 
@@ -75,6 +76,8 @@ def describe_content(
             {"role": "user", "content": user_parts},
         ],
     )
+    if usage_tracker is not None:
+        usage_tracker.record("describe", llm_model, resp)
     description = json_repair.loads(resp.choices[0].message.content)
     log.info("Description generated: %s", description.get("title", ""))
     return description

@@ -11,7 +11,7 @@ import json_repair
 from PIL import Image
 
 from mazinger_dubber.srt import parse_blocks, blocks_to_text
-from mazinger_dubber.utils import estimate_tokens
+from mazinger_dubber.utils import estimate_tokens, LLMUsageTracker
 
 if TYPE_CHECKING:
     from openai import OpenAI
@@ -57,6 +57,7 @@ def _request_timestamps(
     srt_segment: str,
     segment_label: str = "",
     llm_model: str = "gpt-4.1",
+    usage_tracker: LLMUsageTracker | None = None,
 ) -> list[dict]:
     label = f" (segment: {segment_label})" if segment_label else ""
     user_msg = (
@@ -71,6 +72,8 @@ def _request_timestamps(
             {"role": "user", "content": user_msg},
         ],
     )
+    if usage_tracker is not None:
+        usage_tracker.record("thumbnails", llm_model, resp)
     return json_repair.loads(resp.choices[0].message.content)
 
 
@@ -91,6 +94,7 @@ def select_timestamps(
     *,
     llm_model: str = "gpt-4.1",
     min_gap: float = 5.0,
+    usage_tracker: LLMUsageTracker | None = None,
 ) -> list[dict]:
     """Analyse an SRT and return a list of timestamps worth capturing.
 
@@ -104,7 +108,8 @@ def select_timestamps(
     log.info("Estimated SRT tokens: ~%d", est)
 
     if est <= _TOKEN_THRESHOLD:
-        timestamps = _request_timestamps(client, srt_text, llm_model=llm_model)
+        timestamps = _request_timestamps(client, srt_text, llm_model=llm_model,
+                                         usage_tracker=usage_tracker)
         return _deduplicate(timestamps, min_gap)
 
     blocks = parse_blocks(srt_text)
@@ -127,7 +132,8 @@ def select_timestamps(
         label = f"{batch_blocks[0][1] / 60:.0f}min-{batch_blocks[-1][2] / 60:.0f}min"
         log.info("Batch %d: %s (%d subtitles)", batch_num, label, len(batch_blocks))
 
-        batch_ts = _request_timestamps(client, segment_srt, segment_label=label, llm_model=llm_model)
+        batch_ts = _request_timestamps(client, segment_srt, segment_label=label,
+                                         llm_model=llm_model, usage_tracker=usage_tracker)
         all_timestamps.extend(batch_ts)
         window_start += batch_sec
 

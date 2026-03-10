@@ -226,6 +226,7 @@ def synthesize_segments(
     output_dir: str,
     *,
     language: str = "English",
+    force_reset: bool = False,
 ) -> list[dict]:
     """Generate TTS audio for each SRT entry and save as WAV files.
 
@@ -237,11 +238,19 @@ def synthesize_segments(
                       ``end``, ``text``).
         output_dir:   Directory in which to save individual segment WAV files.
         language:     Target language name (e.g. ``English``).
+        force_reset:  When ``True``, delete all existing segment files in
+                      *output_dir* before generating, so every segment is
+                      re-synthesised from scratch.
 
     Returns:
         A list of segment info dicts with keys ``idx``, ``start``, ``end``,
         ``target_dur``, ``wav_path``, and ``actual_dur``.
     """
+    if force_reset and os.path.isdir(output_dir):
+        import glob
+        for f in glob.glob(os.path.join(output_dir, "seg_*.wav")):
+            os.remove(f)
+        log.info("Force-reset: cleared existing segments in %s", output_dir)
     os.makedirs(output_dir, exist_ok=True)
     segment_info: list[dict] = []
 
@@ -265,6 +274,22 @@ def synthesize_segments(
 
         wav_path = os.path.join(output_dir, f"seg_{entry['idx'].zfill(4)}.wav")
 
+        # Resume support: skip segments that were already generated.
+        if os.path.isfile(wav_path) and os.path.getsize(wav_path) > 0:
+            info = sf.info(wav_path)
+            actual_dur = info.duration
+            log.debug("Skipping existing segment %s (%.2fs)", wav_path, actual_dur)
+            segment_info.append({
+                "idx": entry["idx"],
+                "start": entry["start"],
+                "end": entry["end"],
+                "target_dur": target_dur,
+                "wav_path": wav_path,
+                "actual_dur": actual_dur,
+                "_skipped": True,
+            })
+            continue
+
         if use_wrapper:
             audio_data, sr = voice_prompt.synthesize(text, language)
         else:
@@ -287,7 +312,11 @@ def synthesize_segments(
         })
 
     produced = sum(1 for s in segment_info if s["wav_path"])
-    log.info("Synthesised %d/%d segments -> %s", produced, len(srt_entries), output_dir)
+    skipped = sum(1 for s in segment_info if s.get("_skipped"))
+    log.info(
+        "Synthesised %d/%d segments (%d cached) -> %s",
+        produced, len(srt_entries), skipped, output_dir,
+    )
     return segment_info
 
 

@@ -7,7 +7,7 @@ import os
 from typing import Any
 
 from mazinger_dubber.paths import ProjectPaths
-from mazinger_dubber.utils import save_json, load_json, get_audio_duration
+from mazinger_dubber.utils import save_json, load_json, get_audio_duration, LLMUsageTracker
 
 log = logging.getLogger(__name__)
 
@@ -76,6 +76,7 @@ class MazingerDubber:
         cookies_from_browser: str | None = None,
         cookies: str | None = None,
         skip_existing: bool = True,
+        force_reset: bool = False,
         use_resegmented: bool = False,
         tempo_mode: str = "off",
         fixed_tempo: float | None = None,
@@ -108,6 +109,9 @@ class MazingerDubber:
             cookies_from_browser: yt-dlp ``--cookies-from-browser`` value.
             cookies:       Path to a Netscape cookie file for yt-dlp ``--cookies``.
             skip_existing:  When ``True``, skip stages whose outputs already exist.
+            force_reset:    When ``True``, discard all cached/intermediate outputs
+                            and re-run every stage from scratch.  Overrides
+                            *skip_existing*.
             use_resegmented: When ``True``, translate and dub from the resegmented
                             SRT (``source.srt``) instead of the raw output
                             (``source.raw.srt``).  The resegmented SRT has
@@ -137,7 +141,12 @@ class MazingerDubber:
         proj = ProjectPaths(slug, base_dir=self.base_dir).ensure_dirs()
         log.info("Project: %s", proj.root)
 
+        if force_reset:
+            skip_existing = False
+            log.info("Force-reset enabled — all stages will re-run from scratch")
+
         client = self._openai_client()
+        usage_tracker = LLMUsageTracker()
 
         # -- Read voice script -------------------------------------------
         if os.path.isfile(voice_script):
@@ -205,6 +214,7 @@ class MazingerDubber:
         else:
             ts = thumbnails.select_timestamps(
                 source_srt_text, client, llm_model=self.llm_model,
+                usage_tracker=usage_tracker,
             )
             thumb_paths = thumbnails.extract_frames(
                 proj.video, ts, proj.thumbnails_dir,
@@ -222,6 +232,7 @@ class MazingerDubber:
             description = describe.describe_content(
                 source_srt_text, thumb_paths, client,
                 llm_model=self.llm_model,
+                usage_tracker=usage_tracker,
             )
             save_json(description, proj.description)
 
@@ -235,6 +246,7 @@ class MazingerDubber:
                 source_srt_text, description, thumb_paths, client,
                 llm_model=self.llm_model,
                 target_language=tts_language,
+                usage_tracker=usage_tracker,
                 **(dict(words_per_second=words_per_second) if words_per_second is not None else {}),
                 **(dict(duration_budget=duration_budget) if duration_budget is not None else {}),
             )
@@ -247,6 +259,7 @@ class MazingerDubber:
         else:
             resegmented = resegment.resegment_srt(
                 translated_srt, client=client, llm_model=self.llm_model,
+                usage_tracker=usage_tracker,
             )
             with open(proj.final_srt, "w", encoding="utf-8") as fh:
                 fh.write(resegmented)
@@ -272,6 +285,7 @@ class MazingerDubber:
         segment_info = tts.synthesize_segments(
             tts_model, voice_prompt, srt_entries, proj.tts_segments_dir,
             language=tts_language,
+            force_reset=force_reset,
         )
         tts.unload_model(voice_prompt)
 
@@ -292,5 +306,10 @@ class MazingerDubber:
                 assemble.mux_video(proj.video, proj.final_audio, proj.final_video)
             else:
                 log.warning("No source video available — skipping video muxing")
+
+        # 10. LLM usage report -------------------------------------------
+        if usage_tracker.records:
+            log.info(usage_tracker.report())
+            save_json(usage_tracker.records, os.path.join(proj.root, "llm_usage.json"))
 
         return proj
