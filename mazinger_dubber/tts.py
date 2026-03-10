@@ -313,10 +313,25 @@ def synthesize_segments(
 
     produced = sum(1 for s in segment_info if s["wav_path"])
     skipped = sum(1 for s in segment_info if s.get("_skipped"))
+    overflow_segs = [
+        s for s in segment_info
+        if s["wav_path"] and s["actual_dur"] > s["target_dur"] * 1.05
+    ]
     log.info(
         "Synthesised %d/%d segments (%d cached) -> %s",
         produced, len(srt_entries), skipped, output_dir,
     )
+    if overflow_segs:
+        total_overflow = sum(s["actual_dur"] - s["target_dur"] for s in overflow_segs)
+        log.warning(
+            "%d/%d segments exceed target duration (total overflow: %.2fs). "
+            "Segments: %s",
+            len(overflow_segs), len(srt_entries), total_overflow,
+            ", ".join(
+                f'{s["idx"]}({s["actual_dur"]:.1f}s/{s["target_dur"]:.1f}s)'
+                for s in overflow_segs
+            ),
+        )
     return segment_info
 
 

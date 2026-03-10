@@ -29,6 +29,10 @@ MAX_DUR = 30.0
 MIN_DUR = 1.0
 _MERGE_BATCH_SIZE = 40
 _MAX_MERGE_GROUP = 8
+# Maximum silence gap (seconds) between entries that may be merged.
+# Gaps larger than this indicate a natural pause in the original audio
+# that should be preserved to maintain sync.
+_MERGE_MAX_GAP = 1.5
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Phase 1 – Merge fragments into complete phrases
@@ -296,8 +300,24 @@ def _merge_phrases(
             merged.extend(_rule_based_merge(batch))
             continue
 
+        # Post-process LLM groups: split any group whose entries span a
+        # silence gap > _MERGE_MAX_GAP — the LLM doesn't see timestamps
+        # and may merge across natural pauses in the original audio.
+        final_groups: list[list[int]] = []
         for group in groups:
             indices = [g - 1 for g in group]
+            sub: list[int] = [indices[0]]
+            for k in range(1, len(indices)):
+                prev_end = batch[indices[k - 1]][2]
+                cur_start = batch[indices[k]][1]
+                if cur_start - prev_end > _MERGE_MAX_GAP:
+                    final_groups.append(sub)
+                    sub = [indices[k]]
+                else:
+                    sub.append(indices[k])
+            final_groups.append(sub)
+
+        for indices in final_groups:
             texts = [batch[i][3].strip() for i in indices]
             start = batch[indices[0]][1]
             end = batch[indices[-1]][2]
@@ -397,29 +417,69 @@ def _distribute_timestamps(
     start: float,
     end: float,
 ) -> list[tuple[float, float]]:
-    """Assign timestamps proportionally by word count."""
+    """Assign timestamps proportionally by word count.
+
+    Uses iterative redistribution to handle MIN_DUR/MAX_DUR clamping so that
+    the sub-segments always sum exactly to the parent window.
+    """
     total_dur = end - start
-    word_counts = [len(s.split()) for s in segments]
+    n = len(segments)
+
+    if n == 0:
+        return []
+    if n == 1:
+        return [(start, end)]
+
+    word_counts = [max(1, len(s.split())) for s in segments]
     total_words = sum(word_counts)
 
     if total_words == 0:
-        per_seg = total_dur / len(segments)
-        return [(start + i * per_seg, start + (i + 1) * per_seg) for i in range(len(segments))]
+        per_seg = total_dur / n
+        return [(start + i * per_seg, start + (i + 1) * per_seg) for i in range(n)]
+
+    # Iterative distribution: compute proportional durations, clamp, and
+    # redistribute excess/deficit from clamped segments to unclamped ones.
+    durations = [total_dur * (wc / total_words) for wc in word_counts]
+    locked = [False] * n
+
+    for _ in range(5):  # converges in 2-3 iterations
+        excess = 0.0
+        unlocked_words = 0
+        for i in range(n):
+            if locked[i]:
+                continue
+            if durations[i] < MIN_DUR:
+                excess += durations[i] - MIN_DUR  # negative = deficit
+                durations[i] = MIN_DUR
+                locked[i] = True
+            elif durations[i] > MAX_DUR:
+                excess += durations[i] - MAX_DUR  # positive = surplus
+                durations[i] = MAX_DUR
+                locked[i] = True
+            else:
+                unlocked_words += word_counts[i]
+        if abs(excess) < 0.001 or unlocked_words == 0:
+            break
+        # Distribute excess proportionally among unlocked segments
+        for i in range(n):
+            if not locked[i]:
+                durations[i] += excess * (word_counts[i] / unlocked_words)
+
+    # Force-normalise to exactly match total_dur
+    dur_sum = sum(durations)
+    if abs(dur_sum - total_dur) > 0.001:
+        scale = total_dur / dur_sum
+        durations = [d * scale for d in durations]
 
     result: list[tuple[float, float]] = []
     t = start
-    for i, seg in enumerate(segments):
-        proportion = word_counts[i] / total_words
-        seg_dur = total_dur * proportion
-        if i < len(segments) - 1:
-            seg_dur = max(MIN_DUR, min(MAX_DUR, seg_dur))
-        seg_end = min(t + seg_dur, end)
+    for i in range(n):
+        seg_end = t + durations[i]
+        if i == n - 1:
+            seg_end = end  # ensure exact alignment
         result.append((t, seg_end))
         t = seg_end
 
-    if result:
-        s, _ = result[-1]
-        result[-1] = (s, end)
     return result
 
 

@@ -75,7 +75,7 @@ def _cmd_dub(args: argparse.Namespace) -> None:
         force_reset=args.force_reset,
         use_resegmented=args.use_resegmented,
         output_type=args.output_type,
-        tempo_mode="fixed" if args.fixed_tempo else ("dynamic" if args.dynamic_tempo else "off"),
+        tempo_mode="fixed" if args.fixed_tempo else ("dynamic" if args.dynamic_tempo else "auto"),
         fixed_tempo=args.fixed_tempo,
         max_tempo=args.max_tempo,
         words_per_second=args.words_per_second,
@@ -286,7 +286,7 @@ def _cmd_tts(args: argparse.Namespace) -> None:
     )
     tts.unload_model(voice_prompt)
 
-    tempo_mode = "fixed" if args.fixed_tempo else ("dynamic" if args.dynamic_tempo else "off")
+    tempo_mode = "fixed" if args.fixed_tempo else ("dynamic" if args.dynamic_tempo else "auto")
     assemble.assemble_timeline(
         segment_info, original_duration, args.output,
         tempo_mode=tempo_mode,

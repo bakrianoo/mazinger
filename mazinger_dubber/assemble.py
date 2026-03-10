@@ -70,7 +70,7 @@ def assemble_timeline(
     sample_rate: int = TARGET_SR,
     speed_threshold: float = 0.05,
     min_speed_ratio: float = 0.5,
-    tempo_mode: str = "off",
+    tempo_mode: str = "auto",
     fixed_tempo: float | None = None,
     max_tempo: float = 1.3,
 ) -> str:
@@ -87,12 +87,13 @@ def assemble_timeline(
         speed_threshold:   Fractional tolerance before tempo-stretching is applied.
         min_speed_ratio:   Lowest allowed slowdown factor (default 0.5 = max 2× slower).
                            Prevents extreme stretching that sounds unnatural.
-        tempo_mode:        ``off`` — no tempo adjustment (default);
-                           ``dynamic`` — per-segment speed matching;
+        tempo_mode:        ``auto`` — speed up only overflowing segments (default);
+                           ``off`` — no tempo adjustment;
+                           ``dynamic`` — per-segment speed matching (up and down);
                            ``fixed`` — apply *fixed_tempo* to every segment.
         fixed_tempo:       Tempo rate applied to all segments when
                            ``tempo_mode="fixed"`` (e.g. 1.1).
-        max_tempo:         Upper speed limit for dynamic mode (default 1.3).
+        max_tempo:         Upper speed limit for dynamic/auto mode (default 1.3).
 
     Returns:
         The *output_path*.
@@ -102,7 +103,8 @@ def assemble_timeline(
     total_samples = int(original_duration * sample_rate)
     timeline = np.zeros(total_samples, dtype=np.float32)
 
-    stats = {"sped_up": 0, "slowed_down": 0, "ok": 0, "skipped": 0}
+    stats = {"sped_up": 0, "slowed_down": 0, "ok": 0, "skipped": 0, "truncated": 0}
+    overflow_total = 0.0
 
     for seg in tqdm(segment_info, desc="Aligning"):
         if seg["wav_path"] is None:
@@ -126,13 +128,23 @@ def assemble_timeline(
             stretched_path = seg["wav_path"].replace(".wav", "_stretched.wav")
             audio = _tempo_stretch(seg["wav_path"], fixed_tempo, stretched_path, sample_rate)
             stats["sped_up"] += 1
-        elif tempo_mode == "dynamic":
+        elif tempo_mode in ("dynamic", "auto"):
             if speed_ratio > 1.0 + speed_threshold:
                 effective_ratio = min(speed_ratio, max_tempo)
                 stretched_path = seg["wav_path"].replace(".wav", "_stretched.wav")
                 audio = _tempo_stretch(seg["wav_path"], effective_ratio, stretched_path, sample_rate)
                 stats["sped_up"] += 1
-            elif speed_ratio < 1.0 - speed_threshold:
+                if effective_ratio < speed_ratio:
+                    overflow_secs = actual_dur / effective_ratio - target_dur
+                    overflow_total += max(0, overflow_secs)
+                    log.warning(
+                        "Seg %s: TTS=%.2fs > target=%.2fs, capped speed-up at %.2fx "
+                        "(needed %.2fx) — %.2fs will be truncated",
+                        seg["idx"], actual_dur, target_dur,
+                        effective_ratio, speed_ratio, max(0, overflow_secs),
+                    )
+            elif tempo_mode == "dynamic" and speed_ratio < 1.0 - speed_threshold:
+                # "auto" mode only speeds up; never slows down
                 effective_ratio = max(speed_ratio, min_speed_ratio)
                 slowed_path = seg["wav_path"].replace(".wav", "_slowed.wav")
                 audio = _tempo_stretch(seg["wav_path"], effective_ratio, slowed_path, sample_rate)
@@ -141,8 +153,19 @@ def assemble_timeline(
                 audio = raw_audio
                 stats["ok"] += 1
         else:
+            # tempo_mode == "off"
+            if speed_ratio > 1.0 + speed_threshold:
+                overflow_secs = actual_dur - target_dur
+                overflow_total += overflow_secs
+                log.warning(
+                    "Seg %s: TTS=%.2fs > target=%.2fs (overflow %.2fs, will be truncated). "
+                    "Consider using --dynamic-tempo or tempo_mode='auto'.",
+                    seg["idx"], actual_dur, target_dur, overflow_secs,
+                )
+                stats["truncated"] += 1
+            else:
+                stats["ok"] += 1
             audio = raw_audio
-            stats["ok"] += 1
 
         if len(audio) > target_samps:
             audio = audio[:target_samps]
@@ -155,10 +178,19 @@ def assemble_timeline(
 
     sf.write(output_path, timeline, sample_rate)
 
+    if overflow_total > 0.1:
+        log.warning(
+            "Total overflow: %.2fs of TTS audio was truncated to fit the timeline. "
+            "This may cause speech to be cut off. Consider reducing translation "
+            "word count (--duration-budget) or increasing --max-tempo.",
+            overflow_total,
+        )
+
     log.info(
-        "Timeline assembled: %.2fs (sped_up=%d, slowed_down=%d, ok=%d, skipped=%d)",
+        "Timeline assembled: %.2fs (sped_up=%d, slowed_down=%d, ok=%d, skipped=%d, truncated=%d)",
         total_samples / sample_rate,
         stats["sped_up"], stats["slowed_down"], stats["ok"], stats["skipped"],
+        stats["truncated"],
     )
     return output_path
 

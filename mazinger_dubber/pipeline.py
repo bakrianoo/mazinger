@@ -78,7 +78,7 @@ class MazingerDubber:
         skip_existing: bool = True,
         force_reset: bool = False,
         use_resegmented: bool = False,
-        tempo_mode: str = "off",
+        tempo_mode: str = "auto",
         fixed_tempo: float | None = None,
         max_tempo: float = 1.3,
         words_per_second: float | None = None,
