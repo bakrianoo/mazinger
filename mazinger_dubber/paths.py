@@ -42,6 +42,7 @@ class ProjectPaths:
         self.thumbs_meta = os.path.join(self.thumbnails_dir, "meta.json")
         self.description = os.path.join(self.analysis_dir, "description.json")
         self.final_audio = os.path.join(self.tts_dir, "dubbed.wav")
+        self.final_video = os.path.join(self.tts_dir, "dubbed.mp4")
 
     # ------------------------------------------------------------------
 
@@ -71,6 +72,7 @@ class ProjectPaths:
             "thumbnails/meta.json": self.thumbs_meta,
             "analysis/description.json": self.description,
             "tts/dubbed.wav": self.final_audio,
+            "tts/dubbed.mp4": self.final_video,
         }
         lines = [f"Project: {self.slug}", f"  Root: {self.root}"]
         for label, path in labels.items():

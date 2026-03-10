@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 import subprocess
 
 import numpy as np
@@ -159,4 +160,33 @@ def assemble_timeline(
         total_samples / sample_rate,
         stats["sped_up"], stats["slowed_down"], stats["ok"], stats["skipped"],
     )
+    return output_path
+
+
+def mux_video(video_path: str, audio_path: str, output_path: str) -> str | None:
+    """Replace the audio track of *video_path* with *audio_path*.
+
+    Uses ffmpeg to copy the video stream and encode the new audio.
+    Returns *output_path*, or ``None`` if ffmpeg is not installed.
+    """
+    if shutil.which("ffmpeg") is None:
+        log.warning(
+            "ffmpeg not found — cannot produce dubbed video. "
+            "Install ffmpeg (e.g. 'apt install ffmpeg' or 'brew install ffmpeg') "
+            "and re-run with --output-type video."
+        )
+        return None
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", video_path,
+        "-i", audio_path,
+        "-c:v", "copy",
+        "-map", "0:v:0",
+        "-map", "1:a:0",
+        "-shortest",
+        output_path,
+    ]
+    subprocess.run(cmd, check=True, capture_output=True)
+    log.info("Muxed video saved: %s", output_path)
     return output_path

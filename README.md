@@ -72,6 +72,14 @@ mazinger-dubber dub "https://youtube.com/watch?v=VIDEO_ID" \
     --base-dir ./output
 ```
 
+To produce a dubbed **video** (replaces audio track in the source video):
+
+```bash
+mazinger-dubber dub "https://youtube.com/watch?v=VIDEO_ID" \
+    --clone-profile abubakr \
+    --output-type video
+```
+
 The voice sample and script are downloaded automatically (no auth required). You can also use `--clone-profile` with local files:
 
 ```bash

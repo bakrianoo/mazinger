@@ -82,6 +82,7 @@ class MazingerDubber:
         max_tempo: float = 1.3,
         words_per_second: float | None = None,
         duration_budget: float | None = None,
+        output_type: str = "audio",
     ) -> ProjectPaths:
         """Run the full pipeline: download/ingest, transcribe, translate, and dub.
 
@@ -111,6 +112,9 @@ class MazingerDubber:
                             SRT (``source.srt``) instead of the raw output
                             (``source.raw.srt``).  The resegmented SRT has
                             shorter, more readable segments.
+            output_type:    ``audio`` (default) — produce dubbed WAV only;
+                            ``video`` — also mux the dubbed audio into the
+                            source video (requires a video source).
 
         Returns:
             The :class:`ProjectPaths` instance with all output paths populated.
@@ -281,5 +285,12 @@ class MazingerDubber:
 
         drift = abs(get_audio_duration(proj.final_audio) - original_duration)
         log.info("Done. Final audio: %s (drift: %.3fs)", proj.final_audio, drift)
+
+        # 9. Mux video (optional) ----------------------------------------
+        if output_type == "video":
+            if os.path.exists(proj.video):
+                assemble.mux_video(proj.video, proj.final_audio, proj.final_video)
+            else:
+                log.warning("No source video available — skipping video muxing")
 
         return proj

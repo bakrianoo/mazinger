@@ -73,6 +73,7 @@ def _cmd_dub(args: argparse.Namespace) -> None:
         cookies_from_browser=args.cookies_from_browser,
         cookies=args.cookies,
         use_resegmented=args.use_resegmented,
+        output_type=args.output_type,
         tempo_mode="fixed" if args.fixed_tempo else ("dynamic" if args.dynamic_tempo else "off"),
         fixed_tempo=args.fixed_tempo,
         max_tempo=args.max_tempo,
@@ -351,6 +352,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Translate and dub from the resegmented SRT (source.srt) instead of "
              "the raw WhisperX output (source.raw.srt). Resegmented SRT has "
              "shorter, more readable segments.",
+    )
+    p.add_argument(
+        "--output-type", choices=["audio", "video"], default="audio",
+        help="Output type: 'audio' (default) produces dubbed WAV; "
+             "'video' also muxes the dubbed audio into the source video.",
     )
     p.add_argument(
         "--dynamic-tempo", action="store_true",
