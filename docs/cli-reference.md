@@ -57,6 +57,8 @@ mazinger dub <source> [options]
 | `--dynamic-tempo` | off | Per-segment speed matching |
 | `--fixed-tempo` | — | Constant speed multiplier (e.g., `1.1`) |
 | `--max-tempo` | `1.3` | Maximum speed-up for dynamic/auto tempo |
+| `--start` | — | Start timestamp for slicing (e.g. `00:01:30` or `90`) |
+| `--end` | — | End timestamp for slicing (e.g. `00:05:00` or `300`) |
 | `--force-reset` | off | Discard all cached outputs and re-run from scratch |
 | `--openai-api-key` | `$OPENAI_API_KEY` | OpenAI API key |
 | `--openai-base-url` | `$OPENAI_BASE_URL` | Custom API base URL |
@@ -78,6 +80,11 @@ mazinger dub ./lecture.mp4 \
     --output-type video \
     --embed-subtitles \
     --target-language Spanish
+
+# Dub only a portion of the video
+mazinger dub "https://youtube.com/watch?v=abc123" \
+    --clone-profile abubakr --target-language Arabic \
+    --start 00:01:30 --end 00:05:00
 
 # Local transcription, dynamic tempo
 mazinger dub "https://youtube.com/watch?v=abc123" \
@@ -102,11 +109,45 @@ mazinger download <source> [options]
 | `--quality` | best | Video quality |
 | `--cookies-from-browser` | — | Browser name for yt-dlp cookies |
 | `--cookies` | — | Path to cookies.txt |
+| `--start` | — | Start timestamp for slicing (e.g. `00:01:30` or `90`) |
+| `--end` | — | End timestamp for slicing (e.g. `00:05:00` or `300`) |
 
 **Example:**
 
 ```bash
 mazinger download "https://youtube.com/watch?v=abc123" --base-dir ./output --quality 720
+
+# Download and extract only a segment
+mazinger download "https://youtube.com/watch?v=abc123" --start 00:02:00 --end 00:04:00
+```
+
+---
+
+## slice
+
+Extract a time range from a video or audio file.
+
+```bash
+mazinger slice <source> [options]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--slug` | auto-generated | Project slug |
+| `--quality` | best | Video quality |
+| `--cookies-from-browser` | — | Browser name for yt-dlp cookies |
+| `--cookies` | — | Path to cookies.txt |
+| `--start` | — | Start timestamp (e.g. `00:01:30` or `90`) |
+| `--end` | — | End timestamp (e.g. `00:05:00` or `300`) |
+
+**Examples:**
+
+```bash
+# Extract a 3-minute clip from a YouTube video
+mazinger slice "https://youtube.com/watch?v=abc123" --start 00:01:00 --end 00:04:00
+
+# Extract from a local file
+mazinger slice ./lecture.mp4 --start 90 --end 300
 ```
 
 ---

@@ -283,3 +283,51 @@ def extract_audio(video_path: str, audio_path: str) -> str:
     )
     log.info("Audio extracted: %s", audio_path)
     return audio_path
+
+
+def slice_media(input_path: str, output_path: str, *, start: str | None = None, end: str | None = None) -> str:
+    """Extract a time range from a media file using ffmpeg.
+
+    Parameters:
+        input_path:  Source video or audio file.
+        output_path: Destination path for the sliced file.
+        start:       Start timestamp (e.g. ``"00:01:30"`` or ``"90"``).
+        end:         End timestamp (e.g. ``"00:05:00"`` or ``"300"``).
+
+    Returns:
+        The *output_path*.
+    """
+    if not start and not end:
+        return input_path
+
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+    cmd = ["ffmpeg", "-y", "-i", input_path]
+    if start:
+        cmd += ["-ss", start]
+    if end:
+        cmd += ["-to", end]
+    cmd += ["-c", "copy", output_path]
+
+    subprocess.run(cmd, check=True, capture_output=True)
+    log.info("Sliced %s -> %s (start=%s, end=%s)", input_path, output_path, start, end)
+    return output_path
+
+
+def slice_project(proj, *, start: str | None = None, end: str | None = None) -> None:
+    """Slice the video and/or audio of a project in-place."""
+    if not start and not end:
+        return
+
+    if os.path.exists(proj.video):
+        orig = proj.video + ".orig"
+        os.rename(proj.video, orig)
+        slice_media(orig, proj.video, start=start, end=end)
+        os.remove(orig)
+        if os.path.exists(proj.audio):
+            os.remove(proj.audio)
+        extract_audio(proj.video, proj.audio)
+    elif os.path.exists(proj.audio):
+        orig = proj.audio + ".orig"
+        os.rename(proj.audio, orig)
+        slice_media(orig, proj.audio, start=start, end=end)
+        os.remove(orig)

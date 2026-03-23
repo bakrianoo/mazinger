@@ -27,6 +27,8 @@ Fetches a video from a URL using yt-dlp (supports YouTube, Vimeo, and hundreds o
 
 Supports quality selection (`low`, `medium`, `high`, or a numeric height like `1080`) and browser cookie files for authenticated downloads.
 
+Optional `--start` / `--end` flags (or `start`/`end` in the Python API) slice the downloaded media to a time range before any further processing. The standalone `slice` command provides this as an independent operation.
+
 ### 2. Transcribe
 
 Converts the audio track into SRT subtitles. Three backends are available:

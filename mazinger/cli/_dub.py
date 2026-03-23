@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 
 from mazinger.cli._groups import (
-    add_common, add_llm, add_source, add_subtitles, add_tempo,
+    add_common, add_llm, add_slice, add_source, add_subtitles, add_tempo,
     add_tts_engine, add_transcription, add_translation, add_voice,
     require_voice, subtitle_style_from_args, tempo_mode_from_args,
 )
@@ -18,6 +18,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     add_transcription(p)
     add_tts_engine(p)
     add_llm(p)
+    add_slice(p)
     p.add_argument("--device", default="auto", help="Device: auto (default), cuda, or cpu.")
     p.add_argument("--use-resegmented", action="store_true",
                    help="Translate from the resegmented SRT instead of the raw transcript.")
@@ -64,6 +65,8 @@ def handler(args: argparse.Namespace) -> None:
         cookies_from_browser=args.cookies_from_browser,
         cookies=args.cookies,
         quality=args.quality,
+        start=args.start,
+        end=args.end,
         force_reset=args.force_reset,
         use_resegmented=args.use_resegmented,
         output_type=args.output_type,

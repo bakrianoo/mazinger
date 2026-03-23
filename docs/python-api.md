@@ -45,6 +45,8 @@ proj = dubber.dub(
     cookies_from_browser=None,        # str — browser name for yt-dlp cookie extraction
     cookies=None,                     # str — path to cookies.txt
     quality=None,                     # str — "low", "medium", "high", or numeric
+    start=None,                       # str — start timestamp for slicing (e.g. "00:01:30" or "90")
+    end=None,                         # str — end timestamp for slicing (e.g. "00:05:00" or "300")
     skip_existing=True,               # bool — skip stages with existing output
     force_reset=False,                # bool — delete cache and re-run everything
     use_resegmented=False,            # bool — use resegmented SRT for TTS input
@@ -154,6 +156,18 @@ from mazinger.download import resolve_slug, download_video, extract_audio
 slug, info = resolve_slug("https://youtube.com/watch?v=VIDEO_ID")
 download_video("https://youtube.com/watch?v=VIDEO_ID", "video.mp4")
 extract_audio("video.mp4", "audio.mp3")
+```
+
+Slice a downloaded file to a time range:
+
+```python
+from mazinger.download import slice_media, slice_project
+
+# Slice a media file directly
+slice_media("video.mp4", "clip.mp4", start="00:01:30", end="00:05:00")
+
+# Slice a project’s video/audio in-place
+slice_project(proj, start="90", end="300")
 ```
 
 ### transcribe

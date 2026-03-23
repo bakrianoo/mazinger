@@ -38,6 +38,12 @@ def add_source(p: argparse.ArgumentParser, *, required: bool = False) -> None:
     add_cookies(p)
 
 
+def _apply_slice(proj, *, start: str | None, end: str | None) -> None:
+    """Slice the project video and/or audio in-place."""
+    from mazinger.download import slice_project
+    slice_project(proj, start=start, end=end)
+
+
 def resolve_project(args: argparse.Namespace):
     """Download/ingest *source* and return a :class:`ProjectPaths`.
 
@@ -85,6 +91,12 @@ def resolve_project(args: argparse.Namespace):
             download.ingest_local_video(source, proj.video, proj.audio)
         else:
             download.extract_audio(proj.video, proj.audio)
+
+    # -- Apply time slicing if requested ----------------------------------
+    start = getattr(args, "start", None)
+    end = getattr(args, "end", None)
+    if start or end:
+        _apply_slice(proj, start=start, end=end)
 
     log.info("Project: %s", proj.root)
     return proj
@@ -186,6 +198,13 @@ def add_cookies(p: argparse.ArgumentParser) -> None:
                    help="Pass through to yt-dlp --cookies-from-browser.")
     p.add_argument("--cookies", default=None,
                    help="Pass through to yt-dlp --cookies (path to Netscape cookie file).")
+
+
+def add_slice(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--start", default=None,
+                   help="Start timestamp for slicing (e.g. '00:01:30' or '90').")
+    p.add_argument("--end", default=None,
+                   help="End timestamp for slicing (e.g. '00:05:00' or '300').")
 
 
 def add_translation(p: argparse.ArgumentParser) -> None:

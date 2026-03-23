@@ -93,6 +93,7 @@ Every stage has its own sub-command:
 
 ```bash
 mazinger download   "https://youtube.com/watch?v=VIDEO_ID" --base-dir ./output
+mazinger slice      "https://youtube.com/watch?v=VIDEO_ID" --start 00:01:00 --end 00:04:00
 mazinger transcribe ./output/projects/my-video/source/audio.mp3 -o subs.srt
 mazinger translate  --srt subs.srt --target-language French -o translated.srt
 mazinger subtitle   video.mp4 --srt translated.srt -o output.mp4

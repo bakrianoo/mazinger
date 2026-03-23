@@ -78,6 +78,8 @@ class MazingerDubber:
         cookies_from_browser: str | None = None,
         cookies: str | None = None,
         quality: str | None = None,
+        start: str | None = None,
+        end: str | None = None,
         skip_existing: bool = True,
         force_reset: bool = False,
         use_resegmented: bool = False,
@@ -198,6 +200,10 @@ class MazingerDubber:
                 download.ingest_local_video(source, proj.video, proj.audio)
             else:
                 download.extract_audio(proj.video, proj.audio)
+
+        # 1b. Slice to time range ----------------------------------------
+        if start or end:
+            download.slice_project(proj, start=start, end=end)
 
         # 2. Transcribe --------------------------------------------------
         if skip_existing and os.path.exists(proj.source_srt):

@@ -17,6 +17,7 @@ from mazinger.cli import (
     _download,
     _dub,
     _resegment,
+    _slice,
     _speak,
     _subtitle,
     _thumbnails,
@@ -27,6 +28,7 @@ from mazinger.cli import (
 _COMMANDS = (
     _dub,
     _download,
+    _slice,
     _transcribe,
     _thumbnails,
     _describe,

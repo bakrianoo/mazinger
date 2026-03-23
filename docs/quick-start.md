@@ -102,6 +102,18 @@ Each pipeline stage has its own sub-command. This is useful when you want to ins
 mazinger download "https://youtube.com/watch?v=VIDEO_ID" --base-dir ./output
 ```
 
+### Slice a video to a time range
+
+```bash
+# Extract a clip
+mazinger slice "https://youtube.com/watch?v=VIDEO_ID" --start 00:01:30 --end 00:05:00
+
+# Dub only a portion of a video
+mazinger dub "https://youtube.com/watch?v=VIDEO_ID" \
+    --clone-profile abubakr --target-language Arabic \
+    --start 00:01:30 --end 00:05:00
+```
+
 ### Transcribe
 
 ```bash
