@@ -1,6 +1,12 @@
-# Mazinger Dubber
+<p align="center">
+  <img src="docs/assets/logo-main-refined.png" alt="Mazinger Dubber" width="200" height="200" />
+</p>
 
-End-to-end video dubbing pipeline. Download a video, transcribe it, translate the subtitles, clone a voice, and produce a fully dubbed audio or video file — in one command.
+<h1 align="center">Mazinger Dubber</h1>
+
+<p align="center">
+  End-to-end video dubbing pipeline. Download a video, transcribe it, translate the subtitles, clone a voice, and produce a fully dubbed audio or video file — in one command.
+</p>
 
 ## What It Does
 

@@ -285,8 +285,65 @@ def extract_audio(video_path: str, audio_path: str) -> str:
     return audio_path
 
 
-def slice_media(input_path: str, output_path: str, *, start: str | None = None, end: str | None = None) -> str:
+def _parse_timestamp(ts: str) -> float:
+    """Convert a timestamp string to seconds.
+
+    Accepts ``HH:MM:SS``, ``HH:MM:SS.mmm``, ``MM:SS``, ``MM:SS.mmm``,
+    or plain seconds (``"90"``, ``"90.5"``).
+    """
+    ts = ts.strip()
+    if ":" not in ts:
+        return float(ts)
+    parts = ts.split(":")
+    if len(parts) == 3:
+        h, m, s = parts
+        return int(h) * 3600 + int(m) * 60 + float(s)
+    if len(parts) == 2:
+        m, s = parts
+        return int(m) * 60 + float(s)
+    raise ValueError(f"Unrecognised timestamp format: {ts!r}")
+
+
+def _has_video_stream(path: str) -> bool:
+    """Return ``True`` if *path* contains at least one video stream."""
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe", "-v", "error",
+                "-select_streams", "v:0",
+                "-show_entries", "stream=codec_type",
+                "-of", "csv=p=0",
+                path,
+            ],
+            capture_output=True, text=True, check=True,
+        )
+        return result.stdout.strip().lower() == "video"
+    except subprocess.CalledProcessError:
+        return False
+
+
+def slice_media(
+    input_path: str,
+    output_path: str,
+    *,
+    start: str | None = None,
+    end: str | None = None,
+) -> str:
     """Extract a time range from a media file using ffmpeg.
+
+    Produces frame-accurate cuts with no frozen frames by re-encoding
+    video at the cut boundaries.  For audio-only files the audio is
+    re-encoded to avoid partial-frame artifacts.
+
+    The strategy:
+
+    * ``-ss`` is placed **before** ``-i`` for fast input seeking (jumps
+      to the nearest keyframe before the target).
+    * The output is **re-encoded** so that the first frame is a clean
+      I-frame at exactly the requested timestamp — no frozen/black
+      leading frames.
+    * ``-t`` (duration) is used instead of ``-to`` so the length is
+      always relative to the seek point, regardless of ``-ss`` position.
 
     Parameters:
         input_path:  Source video or audio file.
@@ -301,33 +358,95 @@ def slice_media(input_path: str, output_path: str, *, start: str | None = None, 
         return input_path
 
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
-    cmd = ["ffmpeg", "-y", "-i", input_path]
+
+    # Compute duration from start/end so we can use -t (relative)
+    start_sec = _parse_timestamp(start) if start else 0.0
+    end_sec = _parse_timestamp(end) if end else None
+    duration = (end_sec - start_sec) if end_sec is not None else None
+
+    if duration is not None and duration <= 0:
+        raise ValueError(
+            f"End ({end}) must be after start ({start}): "
+            f"computed duration={duration:.3f}s"
+        )
+
+    has_video = _has_video_stream(input_path)
+
+    # -- Build ffmpeg command ---------------------------------------------
+    # -ss before -i = fast seek to the nearest preceding keyframe.
+    cmd: list[str] = ["ffmpeg", "-y"]
     if start:
         cmd += ["-ss", start]
-    if end:
-        cmd += ["-to", end]
-    cmd += ["-c", "copy", output_path]
+    cmd += ["-i", input_path]
+    if duration is not None:
+        cmd += ["-t", f"{duration:.3f}"]
+
+    if has_video:
+        # Re-encode video for frame-accurate start (no frozen frames).
+        # Use CRF-based H.264 for quality; preset "medium" balances speed.
+        cmd += [
+            "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+            "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-b:a", "192k",
+        ]
+    else:
+        # Audio-only: re-encode to ensure clean boundaries.
+        ext = Path(output_path).suffix.lower()
+        if ext == ".mp3":
+            cmd += ["-c:a", "libmp3lame", "-q:a", "2"]
+        elif ext in (".m4a", ".aac"):
+            cmd += ["-c:a", "aac", "-b:a", "192k"]
+        elif ext == ".wav":
+            cmd += ["-c:a", "pcm_s16le"]
+        else:
+            cmd += ["-c:a", "aac", "-b:a", "192k"]
+
+    # Reset timestamps so the output starts at 0.
+    cmd += ["-avoid_negative_ts", "make_zero", "-map_metadata", "-1"]
+    cmd.append(output_path)
 
     subprocess.run(cmd, check=True, capture_output=True)
-    log.info("Sliced %s -> %s (start=%s, end=%s)", input_path, output_path, start, end)
+    log.info(
+        "Sliced %s -> %s (start=%s, end=%s, duration=%.3fs, re-encoded=%s)",
+        input_path, output_path, start, end,
+        duration if duration is not None else -1, has_video,
+    )
     return output_path
 
 
 def slice_project(proj, *, start: str | None = None, end: str | None = None) -> None:
-    """Slice the video and/or audio of a project in-place."""
+    """Slice the video and/or audio of a project in-place.
+
+    After slicing the video, the old audio is discarded and a fresh
+    audio track is extracted from the sliced video to guarantee sync.
+    """
     if not start and not end:
         return
 
     if os.path.exists(proj.video):
         orig = proj.video + ".orig"
         os.rename(proj.video, orig)
-        slice_media(orig, proj.video, start=start, end=end)
-        os.remove(orig)
+        try:
+            slice_media(orig, proj.video, start=start, end=end)
+        except Exception:
+            # Restore original on failure.
+            if not os.path.exists(proj.video):
+                os.rename(orig, proj.video)
+            raise
+        else:
+            os.remove(orig)
+        # Always re-extract audio from the sliced video for consistency.
         if os.path.exists(proj.audio):
             os.remove(proj.audio)
         extract_audio(proj.video, proj.audio)
     elif os.path.exists(proj.audio):
         orig = proj.audio + ".orig"
         os.rename(proj.audio, orig)
-        slice_media(orig, proj.audio, start=start, end=end)
-        os.remove(orig)
+        try:
+            slice_media(orig, proj.audio, start=start, end=end)
+        except Exception:
+            if not os.path.exists(proj.audio):
+                os.rename(orig, proj.audio)
+            raise
+        else:
+            os.remove(orig)
