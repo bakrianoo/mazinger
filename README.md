@@ -74,7 +74,11 @@ mazinger dub "https://youtube.com/watch?v=VIDEO_ID" \
 
 ### Use a voice profile instead of local files
 
-Voice profiles are hosted on HuggingFace and downloaded automatically:
+Voice profiles are hosted on HuggingFace and downloaded automatically. Several ready-made profiles are available out of the box:
+
+`abubakr` · `daheeh-v1` · `3b1b` · `italian-v1` · `morgan-freeman` · `trump-v1`
+
+See the full list with descriptions in the [Available Voice Profiles](docs/voice-profiles.md#available-profiles) doc.
 
 ```bash
 mazinger dub "https://youtube.com/watch?v=VIDEO_ID" \
