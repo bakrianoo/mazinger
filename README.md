@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://huggingface.co/datasets/bakrianoo/mazinger-dubber-profiles/resolve/main/promo-demo/mazinger-promo.mp4?download=true">
-    <img src="https://raw.githubusercontent.com/bakrianoo/mazinger/refs/heads/master/docs/assets/thumbnail.png" alt="Watch demo video" width="720" /><br/>
+    <img src="https://raw.githubusercontent.com/bakrianoo/mazinger/refs/heads/master/docs/assets/thumbnail-demo.png" alt="Watch demo video" width="720" /><br/>
     ▶️ Watch Demo Video (with audio)
   </a>
 </p>
