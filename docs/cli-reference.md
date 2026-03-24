@@ -67,6 +67,7 @@ mazinger dub <source> [options]
 | `--openai-api-key` | `$OPENAI_API_KEY` | OpenAI API key |
 | `--openai-base-url` | `$OPENAI_BASE_URL` | Custom API base URL |
 | `--llm-model` | `gpt-4.1` | LLM model for translation/analysis |
+| `--llm-think` / `--no-llm-think` | — | Enable/disable LLM thinking mode (use `--no-llm-think` for Ollama Qwen3) |
 
 All `--subtitle-*` styling flags are also accepted. See [Subtitle Styling](subtitle-styling.md).
 
@@ -182,6 +183,7 @@ If `source` is provided, the video is downloaded first and its audio is transcri
 | `--no-resegment` | off | Skip the post-transcription resegmentation step |
 | `--refine` | off | Use LLM to add punctuation and fix misheard words |
 | `--llm-model` | `gpt-4.1` | LLM model for refinement |
+| `--llm-think` / `--no-llm-think` | — | Enable/disable LLM thinking mode |
 | `--openai-api-key` | `$OPENAI_API_KEY` | OpenAI API key (for cloud method) |
 
 **Examples:**
@@ -216,6 +218,7 @@ mazinger thumbnails [source] [options]
 | `--meta` | — | Path to save metadata JSON |
 | `--openai-api-key` | `$OPENAI_API_KEY` | OpenAI API key |
 | `--llm-model` | `gpt-4.1` | LLM model |
+| `--llm-think` / `--no-llm-think` | — | Enable/disable LLM thinking mode |
 | `--transcribe-method` | `openai` | Transcription method (if SRT not provided) |
 | `--whisper-model` | varies | Whisper model |
 
@@ -242,6 +245,7 @@ mazinger describe [source] [options]
 | `-o`, `--output` | — | Output JSON path |
 | `--openai-api-key` | `$OPENAI_API_KEY` | OpenAI API key |
 | `--llm-model` | `gpt-4.1` | LLM model |
+| `--llm-think` / `--no-llm-think` | — | Enable/disable LLM thinking mode |
 
 **Example:**
 
@@ -277,6 +281,7 @@ If `source` is provided, the video is downloaded, transcribed, and translated au
 | `--embed-subtitles` | off | Burn translated subtitles into video |
 | `--openai-api-key` | `$OPENAI_API_KEY` | OpenAI API key |
 | `--llm-model` | `gpt-4.1` | LLM model |
+| `--llm-think` / `--no-llm-think` | — | Enable/disable LLM thinking mode |
 | `--transcribe-method` | `openai` | Transcription method (if SRT not provided) |
 
 All `--subtitle-*` styling flags are accepted when `--embed-subtitles` is set.
@@ -312,6 +317,7 @@ mazinger resegment [options]
 | `--max-dur` | `4.0` | Max seconds per subtitle entry |
 | `--openai-api-key` | `$OPENAI_API_KEY` | OpenAI API key (optional — falls back to rules) |
 | `--llm-model` | `gpt-4.1` | LLM model |
+| `--llm-think` / `--no-llm-think` | — | Enable/disable LLM thinking mode |
 
 **Example:**
 
@@ -388,6 +394,7 @@ mazinger subtitle [source] [options]
 | `-o`, `--output` | — | Output video path |
 | `--openai-api-key` | `$OPENAI_API_KEY` | OpenAI API key (if auto-translating) |
 | `--llm-model` | `gpt-4.1` | LLM model |
+| `--llm-think` / `--no-llm-think` | — | Enable/disable LLM thinking mode |
 | `--transcribe-method` | `openai` | Transcription method |
 | `--source-language` | `auto` | Source language |
 | `--target-language` | `English` | Target language |

@@ -32,11 +32,13 @@ class MazingerDubber:
         openai_base_url: str | None = None,
         llm_model: str | None = None,
         base_dir: str = "./mazinger_output",
+        llm_think: bool | None = None,
     ) -> None:
         self.llm_model = llm_model or os.environ.get("OPENAI_MODEL") or "gpt-4.1"
         self.base_dir = base_dir
         self._api_key = openai_api_key or os.environ.get("OPENAI_API_KEY")
         self._base_url = openai_base_url or os.environ.get("OPENAI_BASE_URL")
+        self._llm_think = llm_think
 
     # ------------------------------------------------------------------
     #  Internal helpers
@@ -170,6 +172,7 @@ class MazingerDubber:
 
         client = self._openai_client()
         usage_tracker = LLMUsageTracker()
+        extra_body = {"think": self._llm_think} if self._llm_think is not None else None
 
         # -- Read voice script -------------------------------------------
         if os.path.isfile(voice_script):
@@ -244,6 +247,7 @@ class MazingerDubber:
             ts = thumbnails.select_timestamps(
                 source_srt_text, client, llm_model=self.llm_model,
                 usage_tracker=usage_tracker,
+                extra_body=extra_body,
             )
             thumb_paths = thumbnails.extract_frames(
                 proj.video, ts, proj.thumbnails_dir,
@@ -262,6 +266,7 @@ class MazingerDubber:
                 source_srt_text, thumb_paths, client,
                 llm_model=self.llm_model,
                 usage_tracker=usage_tracker,
+                extra_body=extra_body,
             )
             save_json(description, proj.description)
 
@@ -278,6 +283,7 @@ class MazingerDubber:
                 target_language=target_language,
                 translate_technical_terms=translate_technical_terms,
                 usage_tracker=usage_tracker,
+                extra_body=extra_body,
                 **(dict(words_per_second=words_per_second) if words_per_second is not None else {}),
                 **(dict(duration_budget=duration_budget) if duration_budget is not None else {}),
             )
@@ -291,6 +297,7 @@ class MazingerDubber:
             resegmented = resegment.resegment_srt(
                 translated_srt, client=client, llm_model=self.llm_model,
                 usage_tracker=usage_tracker,
+                extra_body=extra_body,
             )
             with open(proj.final_srt, "w", encoding="utf-8") as fh:
                 fh.write(resegmented)

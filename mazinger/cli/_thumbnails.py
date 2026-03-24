@@ -6,7 +6,7 @@ import argparse
 
 from mazinger.cli._groups import (
     add_common, add_llm, add_source, add_transcription,
-    ensure_transcription, make_openai_client, resolve_project,
+    ensure_transcription, llm_extra_body, make_openai_client, resolve_project,
 )
 
 
@@ -49,7 +49,8 @@ def handler(args: argparse.Namespace) -> None:
     with open(srt_path, encoding="utf-8") as fh:
         srt_text = fh.read()
 
-    timestamps = select_timestamps(srt_text, client, llm_model=args.llm_model)
+    timestamps = select_timestamps(srt_text, client, llm_model=args.llm_model,
+                                    extra_body=llm_extra_body(args))
     results = extract_frames(video, timestamps, output_dir)
 
     meta_path = args.meta or (proj.thumbs_meta if proj else f"{output_dir}/meta.json")

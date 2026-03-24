@@ -480,6 +480,7 @@ def _refine_segments_llm(
     api_key: str | None = None,
     base_url: str | None = None,
     llm_model: str = "gpt-4.1",
+    extra_body: dict | None = None,
 ) -> list[dict]:
     """Use an LLM to add punctuation and fix misheard words in transcribed text.
 
@@ -513,6 +514,7 @@ def _refine_segments_llm(
             )},
             {"role": "user", "content": text_block},
         ],
+        **({"extra_body": extra_body} if extra_body else {}),
     )
 
     refined_text = resp.choices[0].message.content.strip()

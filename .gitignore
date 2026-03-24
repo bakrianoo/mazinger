@@ -8,7 +8,9 @@ build/
 dist/
 *.egg-info/
 *.egg
-mazinger/docs/notebooks/.gradio
+cookies.txt
+docs/notebooks/.gradio
+docs/notebooks/mazinger_output
 
 # Virtual environments
 .venv/

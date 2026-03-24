@@ -33,6 +33,32 @@ mazinger dub "https://youtube.com/watch?v=VIDEO_ID" \
     --llm-model "your-model-name"
 ```
 
+### Ollama (Local LLM)
+
+To use Ollama as a local LLM provider, point the base URL at the Ollama
+OpenAI-compatible endpoint and disable thinking mode for models like Qwen3
+that enable it by default:
+
+```bash
+mazinger dub "https://youtube.com/watch?v=VIDEO_ID" \
+    --clone-profile abubakr \
+    --openai-base-url "http://localhost:11434/v1" \
+    --openai-api-key "ollama" \
+    --llm-model "qwen3.5:2b-q8_0" \
+    --no-llm-think
+```
+
+Or in Python:
+
+```python
+dubber = MazingerDubber(
+    openai_api_key="ollama",
+    openai_base_url="http://localhost:11434/v1",
+    llm_model="qwen3.5:2b-q8_0",
+    llm_think=False,
+)
+```
+
 ## Caching and Resume
 
 Every pipeline stage checks whether its output files exist before running. If they do, the stage is skipped. This makes runs idempotent and resumable.

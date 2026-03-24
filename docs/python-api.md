@@ -16,6 +16,10 @@ MazingerDubber(
     openai_base_url=None,     # str — or set OPENAI_BASE_URL env var
     llm_model=None,           # str — default: OPENAI_MODEL env var or "gpt-4.1"
     base_dir="./mazinger_output",
+    llm_think=None,           # bool | None — True/False to control LLM thinking mode;
+                              #   None (default) sends no preference.
+                              #   Set to False for Ollama models like Qwen3 that
+                              #   have thinking enabled by default.
 )
 ```
 

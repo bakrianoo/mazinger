@@ -150,6 +150,16 @@ def add_openai(p: argparse.ArgumentParser) -> None:
 def add_llm(p: argparse.ArgumentParser) -> None:
     add_openai(p)
     p.add_argument("--llm-model", default=os.environ.get("OPENAI_MODEL", "gpt-4.1"), help="LLM model for translation/analysis.")
+    p.add_argument(
+        "--llm-think", action=argparse.BooleanOptionalAction, default=None,
+        help="Enable/disable LLM thinking mode (e.g. --no-llm-think for Ollama Qwen3).",
+    )
+
+
+def llm_extra_body(args: argparse.Namespace) -> dict | None:
+    """Build ``extra_body`` dict from CLI args for LLM thinking control."""
+    think = getattr(args, "llm_think", None)
+    return {"think": think} if think is not None else None
 
 
 def add_voice(p: argparse.ArgumentParser) -> None:

@@ -7,7 +7,8 @@ import argparse
 from mazinger.cli._groups import (
     add_common, add_llm, add_source, add_tempo, add_transcription,
     add_translation, add_tts_engine, add_voice, ensure_transcription,
-    make_openai_client, require_voice, resolve_project, tempo_mode_from_args,
+    llm_extra_body, make_openai_client, require_voice, resolve_project,
+    tempo_mode_from_args,
 )
 
 
@@ -58,6 +59,7 @@ def handler(args: argparse.Namespace) -> None:
                 srt_text, description, thumb_paths, client, llm_model=args.llm_model,
                 source_language=args.source_language,
                 target_language=args.target_language,
+                extra_body=llm_extra_body(args),
                 **(dict(words_per_second=args.words_per_second) if args.words_per_second is not None else {}),
                 **(dict(duration_budget=args.duration_budget) if args.duration_budget is not None else {}),
             )

@@ -51,6 +51,7 @@ def handler(args: argparse.Namespace) -> None:
         openai_base_url=args.openai_base_url,
         llm_model=args.llm_model,
         base_dir=args.base_dir,
+        llm_think=args.llm_think,
     )
     proj = dubber.dub(
         source=args.source,

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 
-from mazinger.cli._groups import add_common, add_llm
+from mazinger.cli._groups import add_common, add_llm, llm_extra_body
 
 
 def register(subparsers: argparse._SubParsersAction) -> None:
@@ -34,6 +34,7 @@ def handler(args: argparse.Namespace) -> None:
         llm_model=args.llm_model,
         max_chars=args.max_chars,
         max_dur=args.max_dur,
+        extra_body=llm_extra_body(args),
     )
     with open(args.output, "w", encoding="utf-8") as fh:
         fh.write(result)

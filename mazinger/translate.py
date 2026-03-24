@@ -295,6 +295,7 @@ def translate_srt(
     duration_budget: float = DURATION_BUDGET,
     translate_technical_terms: bool = False,
     usage_tracker: LLMUsageTracker | None = None,
+    extra_body: dict | None = None,
 ) -> str:
     """Translate an SRT file to the target language using batched LLM calls with visual context.
 
@@ -374,6 +375,7 @@ def translate_srt(
         )
         resp = client.chat.completions.create(
             model=llm_model, temperature=0.3, messages=msgs,
+            **({"extra_body": extra_body} if extra_body else {}),
         )
         if usage_tracker is not None:
             usage_tracker.record("translate", llm_model, resp)

@@ -58,6 +58,7 @@ def _request_timestamps(
     segment_label: str = "",
     llm_model: str = "gpt-4.1",
     usage_tracker: LLMUsageTracker | None = None,
+    extra_body: dict | None = None,
 ) -> list[dict]:
     label = f" (segment: {segment_label})" if segment_label else ""
     user_msg = (
@@ -71,6 +72,7 @@ def _request_timestamps(
             {"role": "system", "content": _TIMESTAMP_SYSTEM},
             {"role": "user", "content": user_msg},
         ],
+        **({"extra_body": extra_body} if extra_body else {}),
     )
     if usage_tracker is not None:
         usage_tracker.record("thumbnails", llm_model, resp)
@@ -95,6 +97,7 @@ def select_timestamps(
     llm_model: str = "gpt-4.1",
     min_gap: float = 5.0,
     usage_tracker: LLMUsageTracker | None = None,
+    extra_body: dict | None = None,
 ) -> list[dict]:
     """Analyse an SRT and return a list of timestamps worth capturing.
 
@@ -109,7 +112,8 @@ def select_timestamps(
 
     if est <= _TOKEN_THRESHOLD:
         timestamps = _request_timestamps(client, srt_text, llm_model=llm_model,
-                                         usage_tracker=usage_tracker)
+                                         usage_tracker=usage_tracker,
+                                         extra_body=extra_body)
         return _deduplicate(timestamps, min_gap)
 
     blocks = parse_blocks(srt_text)
@@ -133,7 +137,8 @@ def select_timestamps(
         log.info("Batch %d: %s (%d subtitles)", batch_num, label, len(batch_blocks))
 
         batch_ts = _request_timestamps(client, segment_srt, segment_label=label,
-                                         llm_model=llm_model, usage_tracker=usage_tracker)
+                                         llm_model=llm_model, usage_tracker=usage_tracker,
+                                         extra_body=extra_body)
         all_timestamps.extend(batch_ts)
         window_start += batch_sec
 

@@ -6,8 +6,8 @@ import argparse
 
 from mazinger.cli._groups import (
     add_common, add_llm, add_source, add_subtitles, add_transcription,
-    add_translation, ensure_transcription, make_openai_client,
-    resolve_project, subtitle_style_from_args,
+    add_translation, ensure_transcription, llm_extra_body,
+    make_openai_client, resolve_project, subtitle_style_from_args,
 )
 
 
@@ -61,6 +61,7 @@ def handler(args: argparse.Namespace) -> None:
         source_language=args.source_language,
         target_language=args.target_language,
         translate_technical_terms=args.translate_technical_terms,
+        extra_body=llm_extra_body(args),
         **(dict(words_per_second=args.words_per_second) if args.words_per_second is not None else {}),
         **(dict(duration_budget=args.duration_budget) if args.duration_budget is not None else {}),
     )
@@ -76,7 +77,8 @@ def handler(args: argparse.Namespace) -> None:
         # Resegment for readable captions before burning
         with open(output, encoding="utf-8") as fh:
             raw = fh.read()
-        resegmented = resegment_srt(raw, client=client, llm_model=args.llm_model)
+        resegmented = resegment_srt(raw, client=client, llm_model=args.llm_model,
+                                     extra_body=llm_extra_body(args))
         with open(output, "w", encoding="utf-8") as fh:
             fh.write(resegmented)
         print(f"Resegmented SRT saved: {output}")

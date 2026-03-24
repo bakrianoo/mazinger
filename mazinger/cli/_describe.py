@@ -6,7 +6,7 @@ import argparse
 
 from mazinger.cli._groups import (
     add_common, add_llm, add_source, add_transcription,
-    ensure_transcription, make_openai_client, resolve_project,
+    ensure_transcription, llm_extra_body, make_openai_client, resolve_project,
 )
 
 
@@ -51,13 +51,15 @@ def handler(args: argparse.Namespace) -> None:
     elif proj and os.path.exists(proj.thumbs_meta):
         thumb_paths = load_json(proj.thumbs_meta)
     elif proj and os.path.exists(proj.video):
-        ts = select_timestamps(srt_text, client, llm_model=args.llm_model)
+        ts = select_timestamps(srt_text, client, llm_model=args.llm_model,
+                               extra_body=llm_extra_body(args))
         thumb_paths = extract_frames(proj.video, ts, proj.thumbnails_dir)
         save_json(thumb_paths, proj.thumbs_meta)
     else:
         sys.exit("Error: provide --thumbnails-meta or a video source for auto-extraction.")
 
-    desc = describe_content(srt_text, thumb_paths, client, llm_model=args.llm_model)
+    desc = describe_content(srt_text, thumb_paths, client, llm_model=args.llm_model,
+                            extra_body=llm_extra_body(args))
     os.makedirs(os.path.dirname(output) or ".", exist_ok=True)
     save_json(desc, output)
     print(f"Description saved: {output}")
