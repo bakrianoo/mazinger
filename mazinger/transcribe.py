@@ -369,7 +369,20 @@ def _transcribe_faster_whisper(
         log.info("Reusing cached faster-whisper model: %s", cache_key)
         whisper_model = _whisper_cache[cache_key]
     else:
-        whisper_model = WhisperModel(model, device=device, compute_type=compute_type)
+        try:
+            whisper_model = WhisperModel(model, device=device, compute_type=compute_type)
+        except ValueError:
+            fallback = "int8" if device == "cpu" else "int8_float16"
+            log.warning(
+                "Compute type %s not supported on %s — falling back to %s",
+                compute_type, device, fallback,
+            )
+            compute_type = fallback
+            cache_key = f"{model}|{device}|{compute_type}"
+            if cache_key in _whisper_cache:
+                whisper_model = _whisper_cache[cache_key]
+            else:
+                whisper_model = WhisperModel(model, device=device, compute_type=compute_type)
         _whisper_cache[cache_key] = whisper_model
 
     # Use batched inference for better performance
@@ -445,7 +458,16 @@ def _transcribe_whisperx(
     )
 
     # Step 1 -- transcribe
-    whisper_model = whisperx.load_model(model, device, compute_type=compute_type)
+    try:
+        whisper_model = whisperx.load_model(model, device, compute_type=compute_type)
+    except ValueError:
+        fallback = "int8" if device == "cpu" else "int8_float16"
+        log.warning(
+            "Compute type %s not supported on %s — falling back to %s",
+            compute_type, device, fallback,
+        )
+        compute_type = fallback
+        whisper_model = whisperx.load_model(model, device, compute_type=compute_type)
     result = whisper_model.transcribe(audio_path, batch_size=batch_size, language=language)
     detected_lang = result.get("language", "unknown")
     log.info("Detected language: %s  (%d raw segments)", detected_lang, len(result["segments"]))

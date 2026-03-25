@@ -63,6 +63,24 @@ def _load_qwen_model(
     }
     torch_dtype = dtype_map.get(dtype, torch.bfloat16)
 
+    # Auto-detect compatible dtype when the device doesn't support the
+    # requested precision (e.g. CPU or older GPUs without bfloat16).
+    _is_cpu = "cpu" in str(device)
+    if torch_dtype == torch.bfloat16 and (
+        _is_cpu or not torch.cuda.is_bf16_supported()
+    ):
+        log.warning(
+            "bfloat16 not supported on %s — falling back to float32", device,
+        )
+        torch_dtype = torch.float32
+        dtype = "float32"
+    elif torch_dtype == torch.float16 and _is_cpu:
+        log.warning(
+            "float16 not efficient on CPU — falling back to float32",
+        )
+        torch_dtype = torch.float32
+        dtype = "float32"
+
     model = Qwen3TTSModel.from_pretrained(
         model_name, device_map=device, dtype=torch_dtype,
     )
