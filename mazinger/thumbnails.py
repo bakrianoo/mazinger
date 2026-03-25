@@ -88,6 +88,46 @@ def _deduplicate(ts_list: list[dict], min_gap: float = 5.0) -> list[dict]:
     return result
 
 
+def _validate_timestamps(ts_list: list, total_end: float) -> list[dict]:
+    """Keep only entries with a valid 'seconds' field within the video duration."""
+    valid = []
+    for t in ts_list:
+        if not isinstance(t, dict):
+            continue
+        sec = t.get("seconds")
+        if sec is None:
+            continue
+        try:
+            sec = float(sec)
+        except (ValueError, TypeError):
+            continue
+        if 0 <= sec <= total_end:
+            t["seconds"] = sec
+            valid.append(t)
+    return valid
+
+
+def _uniform_timestamps(
+    blocks: list[tuple[str, float, float, str]],
+    total_end: float,
+    min_gap: float,
+) -> list[dict]:
+    """Generate evenly-spaced timestamps as a fallback when the LLM fails."""
+    count = max(1, min(12, int(total_end // max(min_gap, 5))))
+    step = total_end / (count + 1)
+    results = []
+    for i in range(1, count + 1):
+        sec = round(step * i, 1)
+        m, s = divmod(int(sec), 60)
+        h, m = divmod(m, 60)
+        results.append({
+            "timestamp": f"{h:02d}:{m:02d}:{s:02d}",
+            "seconds": sec,
+            "reason": "uniform sample",
+        })
+    return results
+
+
 def select_timestamps(
     srt_text: str,
     client: OpenAI,
@@ -104,16 +144,24 @@ def select_timestamps(
     Returns:
         A de-duplicated list of ``{"timestamp", "seconds", "reason"}`` dicts.
     """
+    blocks = parse_blocks(srt_text)
+    if not blocks:
+        log.warning("Empty SRT — cannot select timestamps")
+        return []
+
+    total_end = max(b[2] for b in blocks)
     est = estimate_tokens(srt_text)
     log.info("Estimated SRT tokens: ~%d", est)
 
     if est <= _TOKEN_THRESHOLD:
         timestamps = _request_timestamps(client, srt_text, llm_model=llm_model,
                                          usage_tracker=usage_tracker)
-        return _deduplicate(timestamps, min_gap)
+        timestamps = _validate_timestamps(timestamps, total_end)
+        if timestamps:
+            return _deduplicate(timestamps, min_gap)
+        log.warning("LLM returned no valid timestamps — falling back to uniform sampling")
+        return _uniform_timestamps(blocks, total_end, min_gap)
 
-    blocks = parse_blocks(srt_text)
-    total_end = max(b[2] for b in blocks)
     batch_sec = _BATCH_MINUTES * 60
 
     all_timestamps: list[dict] = []
@@ -137,7 +185,11 @@ def select_timestamps(
         all_timestamps.extend(batch_ts)
         window_start += batch_sec
 
-    return _deduplicate(all_timestamps, min_gap)
+    all_timestamps = _validate_timestamps(all_timestamps, total_end)
+    if all_timestamps:
+        return _deduplicate(all_timestamps, min_gap)
+    log.warning("LLM returned no valid timestamps — falling back to uniform sampling")
+    return _uniform_timestamps(blocks, total_end, min_gap)
 
 
 # ---------------------------------------------------------------------------
