@@ -6,8 +6,8 @@ import argparse
 
 from mazinger.cli._groups import (
     add_common, add_llm, add_source, add_subtitle_style, add_transcription,
-    add_translation, ensure_transcription, llm_extra_body,
-    make_openai_client, resolve_project, subtitle_style_from_args,
+    add_translation, ensure_transcription,
+    make_llm_client, resolve_project, subtitle_style_from_args,
 )
 
 
@@ -46,7 +46,7 @@ def handler(args: argparse.Namespace) -> None:
             from mazinger.translate import translate_srt
             from mazinger.resegment import resegment_srt
             from mazinger.utils import load_json
-            client = make_openai_client(args)
+            client = make_llm_client(args)
             with open(proj.source_srt, encoding="utf-8") as fh:
                 srt_text = fh.read()
             description = load_json(proj.description) if os.path.exists(proj.description) else {}
@@ -55,7 +55,6 @@ def handler(args: argparse.Namespace) -> None:
                 srt_text, description, thumb_paths, client, llm_model=args.llm_model,
                 source_language=args.source_language,
                 target_language=args.target_language,
-                extra_body=llm_extra_body(args),
                 **(dict(words_per_second=args.words_per_second) if args.words_per_second is not None else {}),
                 **(dict(duration_budget=args.duration_budget) if args.duration_budget is not None else {}),
             )
@@ -63,8 +62,7 @@ def handler(args: argparse.Namespace) -> None:
             os.makedirs(os.path.dirname(proj.translated_raw_srt) or ".", exist_ok=True)
             with open(proj.translated_raw_srt, "w", encoding="utf-8") as fh:
                 fh.write(translated)
-            resegmented = resegment_srt(translated, client=client, llm_model=args.llm_model,
-                                         extra_body=llm_extra_body(args))
+            resegmented = resegment_srt(translated, client=client, llm_model=args.llm_model)
             os.makedirs(os.path.dirname(proj.final_srt) or ".", exist_ok=True)
             with open(proj.final_srt, "w", encoding="utf-8") as fh:
                 fh.write(resegmented)

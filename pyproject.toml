@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mazinger"
-version = "1.8.0"
+version = "1.8.1"
 description = "End-to-end video dubbing pipeline: transcribe, translate, and voice-clone."
 readme = "README.md"
 license = {text = "MIT"}
@@ -17,6 +17,7 @@ dependencies = [
     "soundfile>=0.12",
     "numpy>=1.24",
     "tqdm>=4.60",
+    "python-slugify>=8.0",
 ]
 
 [project.optional-dependencies]

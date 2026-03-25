@@ -6,7 +6,7 @@ import argparse
 
 from mazinger.cli._groups import (
     add_common, add_llm, add_source, add_transcription,
-    ensure_transcription, llm_extra_body, make_openai_client, resolve_project,
+    ensure_transcription, make_llm_client, resolve_project,
 )
 
 
@@ -41,7 +41,7 @@ def handler(args: argparse.Namespace) -> None:
     if not output:
         sys.exit("Error: provide a source (positional) or -o/--output.")
 
-    client = make_openai_client(args)
+    client = make_llm_client(args)
     with open(srt_path, encoding="utf-8") as fh:
         srt_text = fh.read()
 
@@ -51,15 +51,13 @@ def handler(args: argparse.Namespace) -> None:
     elif proj and os.path.exists(proj.thumbs_meta):
         thumb_paths = load_json(proj.thumbs_meta)
     elif proj and os.path.exists(proj.video):
-        ts = select_timestamps(srt_text, client, llm_model=args.llm_model,
-                               extra_body=llm_extra_body(args))
+        ts = select_timestamps(srt_text, client, llm_model=args.llm_model)
         thumb_paths = extract_frames(proj.video, ts, proj.thumbnails_dir)
         save_json(thumb_paths, proj.thumbs_meta)
     else:
         sys.exit("Error: provide --thumbnails-meta or a video source for auto-extraction.")
 
-    desc = describe_content(srt_text, thumb_paths, client, llm_model=args.llm_model,
-                            extra_body=llm_extra_body(args))
+    desc = describe_content(srt_text, thumb_paths, client, llm_model=args.llm_model)
     os.makedirs(os.path.dirname(output) or ".", exist_ok=True)
     save_json(desc, output)
     print(f"Description saved: {output}")

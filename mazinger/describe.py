@@ -36,7 +36,6 @@ def describe_content(
     *,
     llm_model: str = "gpt-4.1",
     usage_tracker: LLMUsageTracker | None = None,
-    extra_body: dict | None = None,
 ) -> dict:
     """Send thumbnails and the full SRT to an LLM for content analysis.
 
@@ -76,7 +75,6 @@ def describe_content(
             {"role": "system", "content": _DESCRIBE_SYSTEM},
             {"role": "user", "content": user_parts},
         ],
-        **({"extra_body": extra_body} if extra_body else {}),
     )
     if usage_tracker is not None:
         usage_tracker.record("describe", llm_model, resp)

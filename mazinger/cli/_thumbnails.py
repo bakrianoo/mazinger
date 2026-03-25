@@ -6,7 +6,7 @@ import argparse
 
 from mazinger.cli._groups import (
     add_common, add_llm, add_source, add_transcription,
-    ensure_transcription, llm_extra_body, make_openai_client, resolve_project,
+    ensure_transcription, make_llm_client, resolve_project,
 )
 
 
@@ -45,12 +45,11 @@ def handler(args: argparse.Namespace) -> None:
     if not output_dir:
         sys.exit("Error: provide a source (positional) or --output-dir.")
 
-    client = make_openai_client(args)
+    client = make_llm_client(args)
     with open(srt_path, encoding="utf-8") as fh:
         srt_text = fh.read()
 
-    timestamps = select_timestamps(srt_text, client, llm_model=args.llm_model,
-                                    extra_body=llm_extra_body(args))
+    timestamps = select_timestamps(srt_text, client, llm_model=args.llm_model)
     results = extract_frames(video, timestamps, output_dir)
 
     meta_path = args.meta or (proj.thumbs_meta if proj else f"{output_dir}/meta.json")

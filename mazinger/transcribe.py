@@ -502,20 +502,14 @@ def _refine_segments_llm(
     api_key: str | None = None,
     base_url: str | None = None,
     llm_model: str = "gpt-4.1",
-    extra_body: dict | None = None,
 ) -> list[dict]:
     """Use an LLM to add punctuation and fix misheard words in transcribed text.
 
     Preserves timestamps — only the text of each segment is modified.
     """
-    from openai import OpenAI
+    from mazinger.llm import build_client
 
-    kwargs: dict[str, Any] = {}
-    if api_key:
-        kwargs["api_key"] = api_key
-    if base_url:
-        kwargs["base_url"] = base_url
-    client = OpenAI(**kwargs)
+    client = build_client(api_key=api_key, base_url=base_url)
 
     # Build the text block with indices so we can map back
     numbered = []
@@ -536,7 +530,6 @@ def _refine_segments_llm(
             )},
             {"role": "user", "content": text_block},
         ],
-        **({"extra_body": extra_body} if extra_body else {}),
     )
 
     refined_text = resp.choices[0].message.content.strip()

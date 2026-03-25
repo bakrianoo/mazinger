@@ -44,15 +44,14 @@ class MazingerDubber:
     #  Internal helpers
     # ------------------------------------------------------------------
 
-    def _openai_client(self) -> Any:
-        from openai import OpenAI
+    def _llm_client(self) -> Any:
+        from mazinger.llm import build_client
 
-        kwargs: dict[str, Any] = {}
-        if self._api_key:
-            kwargs["api_key"] = self._api_key
-        if self._base_url:
-            kwargs["base_url"] = self._base_url
-        return OpenAI(**kwargs)
+        return build_client(
+            api_key=self._api_key,
+            base_url=self._base_url,
+            think=self._llm_think,
+        )
 
     # ------------------------------------------------------------------
     #  Public API
@@ -199,9 +198,8 @@ class MazingerDubber:
             skip_existing = False
             log.info("Force-reset enabled — all stages will re-run from scratch")
 
-        client = self._openai_client()
+        client = self._llm_client()
         usage_tracker = LLMUsageTracker()
-        extra_body = {"think": self._llm_think} if self._llm_think is not None else None
 
         # -- Read voice script -------------------------------------------
         if os.path.isfile(voice_script):
@@ -276,7 +274,6 @@ class MazingerDubber:
             ts = thumbnails.select_timestamps(
                 source_srt_text, client, llm_model=self.llm_model,
                 usage_tracker=usage_tracker,
-                extra_body=extra_body,
             )
             thumb_paths = thumbnails.extract_frames(
                 proj.video, ts, proj.thumbnails_dir,
@@ -295,7 +292,6 @@ class MazingerDubber:
                 source_srt_text, thumb_paths, client,
                 llm_model=self.llm_model,
                 usage_tracker=usage_tracker,
-                extra_body=extra_body,
             )
             save_json(description, proj.description)
 
@@ -312,7 +308,6 @@ class MazingerDubber:
                 target_language=target_language,
                 translate_technical_terms=translate_technical_terms,
                 usage_tracker=usage_tracker,
-                extra_body=extra_body,
                 **(dict(words_per_second=words_per_second) if words_per_second is not None else {}),
                 **(dict(duration_budget=duration_budget) if duration_budget is not None else {}),
             )
@@ -326,7 +321,6 @@ class MazingerDubber:
             resegmented = resegment.resegment_srt(
                 translated_srt, client=client, llm_model=self.llm_model,
                 usage_tracker=usage_tracker,
-                extra_body=extra_body,
             )
             with open(proj.final_srt, "w", encoding="utf-8") as fh:
                 fh.write(resegmented)
@@ -353,7 +347,7 @@ class MazingerDubber:
             language=tts_language,
             force_reset=force_reset,
         )
-        tts.unload_model(voice_prompt)
+        tts.unload_model(voice_prompt, force=True)
 
         # 8. Assemble final audio ----------------------------------------
         assemble.assemble_timeline(

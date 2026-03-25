@@ -187,7 +187,6 @@ def _llm_merge_batch(
     client: OpenAI,
     llm_model: str,
     usage_tracker: LLMUsageTracker | None = None,
-    extra_body: dict | None = None,
 ) -> list[list[int]] | None:
     """Ask the LLM which consecutive entries should be merged."""
     lines = []
@@ -209,7 +208,6 @@ def _llm_merge_batch(
                     ),
                 },
             ],
-            **({"extra_body": extra_body} if extra_body else {}),
         )
         if usage_tracker is not None:
             usage_tracker.record("resegment-merge", llm_model, resp)
@@ -281,7 +279,6 @@ def _merge_phrases(
     client: OpenAI | None,
     llm_model: str,
     usage_tracker: LLMUsageTracker | None = None,
-    extra_body: dict | None = None,
 ) -> list[tuple[float, float, str]]:
     """Merge consecutive SRT blocks that belong to the same speech phrase."""
     if not blocks:
@@ -296,8 +293,7 @@ def _merge_phrases(
     for batch_start in range(0, len(blocks), _MERGE_BATCH_SIZE):
         batch = blocks[batch_start : batch_start + _MERGE_BATCH_SIZE]
 
-        groups = _llm_merge_batch(batch, client, llm_model, usage_tracker=usage_tracker,
-                                  extra_body=extra_body)
+        groups = _llm_merge_batch(batch, client, llm_model, usage_tracker=usage_tracker)
         merge_calls += 1
 
         if groups is None:
@@ -357,7 +353,6 @@ def _llm_split(
     client: OpenAI,
     llm_model: str = "gpt-4.1",
     usage_tracker: LLMUsageTracker | None = None,
-    extra_body: dict | None = None,
 ) -> list[str]:
     """Use an LLM to split long text into caption-sized pieces."""
     resp = client.chat.completions.create(
@@ -367,7 +362,6 @@ def _llm_split(
             {"role": "system", "content": _SPLIT_SYSTEM},
             {"role": "user", "content": f"Split this subtitle text:\n\n{text}"},
         ],
-        **({"extra_body": extra_body} if extra_body else {}),
     )
     if usage_tracker is not None:
         usage_tracker.record("resegment-split", llm_model, resp)
@@ -501,7 +495,6 @@ def resegment_srt(
     max_chars: int = MAX_CHARS,
     max_dur: float = MAX_DUR,
     usage_tracker: LLMUsageTracker | None = None,
-    extra_body: dict | None = None,
 ) -> str:
     """Re-segment an SRT string so every entry is a complete speech phrase.
 
@@ -518,8 +511,7 @@ def resegment_srt(
     blocks = parse_blocks(srt_text)
 
     # ── Phase 1: merge fragments into complete phrases ────────────────
-    merged = _merge_phrases(blocks, client, llm_model, usage_tracker=usage_tracker,
-                            extra_body=extra_body)
+    merged = _merge_phrases(blocks, client, llm_model, usage_tracker=usage_tracker)
 
     # ── Phase 2: split overly-long entries ────────────────────────────
     resegmented: list[tuple[float, float, str]] = []
@@ -540,8 +532,7 @@ def resegment_srt(
         segments: list[str] | None = None
         if client is not None:
             try:
-                segments = _llm_split(text, client, llm_model, usage_tracker=usage_tracker,
-                                      extra_body=extra_body)
+                segments = _llm_split(text, client, llm_model, usage_tracker=usage_tracker)
                 split_calls += 1
                 joined = " ".join(segments)
                 if joined.replace("  ", " ").strip() != text.replace("  ", " ").strip():

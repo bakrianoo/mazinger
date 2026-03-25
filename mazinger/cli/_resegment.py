@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 
-from mazinger.cli._groups import add_common, add_llm, llm_extra_body
+from mazinger.cli._groups import add_common, add_llm
 
 
 def register(subparsers: argparse._SubParsersAction) -> None:
@@ -22,8 +22,8 @@ def handler(args: argparse.Namespace) -> None:
 
     client = None
     if args.openai_api_key or args.openai_base_url:
-        from mazinger.cli._groups import make_openai_client
-        client = make_openai_client(args)
+        from mazinger.cli._groups import make_llm_client
+        client = make_llm_client(args)
 
     with open(args.srt, encoding="utf-8") as fh:
         srt_text = fh.read()
@@ -34,7 +34,6 @@ def handler(args: argparse.Namespace) -> None:
         llm_model=args.llm_model,
         max_chars=args.max_chars,
         max_dur=args.max_dur,
-        extra_body=llm_extra_body(args),
     )
     with open(args.output, "w", encoding="utf-8") as fh:
         fh.write(result)

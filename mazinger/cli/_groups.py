@@ -156,10 +156,7 @@ def add_llm(p: argparse.ArgumentParser) -> None:
     )
 
 
-def llm_extra_body(args: argparse.Namespace) -> dict | None:
-    """Build ``extra_body`` dict from CLI args for LLM thinking control."""
-    think = getattr(args, "llm_think", None)
-    return {"think": think} if think is not None else None
+
 
 
 def add_voice(p: argparse.ArgumentParser) -> None:
@@ -270,14 +267,13 @@ def require_voice(args: argparse.Namespace) -> tuple[str, str]:
     return sample, script
 
 
-def make_openai_client(args: argparse.Namespace):
-    from openai import OpenAI
-    kw = {}
-    if args.openai_api_key:
-        kw["api_key"] = args.openai_api_key
-    if args.openai_base_url:
-        kw["base_url"] = args.openai_base_url
-    return OpenAI(**kw)
+def make_llm_client(args: argparse.Namespace):
+    from mazinger.llm import build_client
+    return build_client(
+        api_key=getattr(args, "openai_api_key", None),
+        base_url=getattr(args, "openai_base_url", None),
+        think=getattr(args, "llm_think", None),
+    )
 
 
 def tempo_mode_from_args(args: argparse.Namespace) -> str:

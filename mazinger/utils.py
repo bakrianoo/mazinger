@@ -18,11 +18,8 @@ log = logging.getLogger(__name__)
 
 def sanitize_filename(title: str) -> str:
     """Normalise a human-readable title into a filesystem-safe slug."""
-    name = title.lower()
-    name = re.sub(r"[^\w\s-]", "", name)
-    name = re.sub(r"[\s_]+", "-", name)
-    name = re.sub(r"-+", "-", name).strip("-")
-    return name
+    from slugify import slugify
+    return slugify(title, allow_unicode=True)
 
 
 # ---------------------------------------------------------------------------
