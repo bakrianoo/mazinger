@@ -241,6 +241,18 @@ def run_dubbing(
     if paths:
         if hasattr(paths, "final_audio") and os.path.isfile(paths.final_audio):
             audio_out = paths.final_audio
+            # Convert large WAV to MP3 for faster Gradio preview loading
+            mp3_preview = paths.final_audio.rsplit(".", 1)[0] + ".mp3"
+            try:
+                import subprocess as _sp
+                _sp.run(
+                    ["ffmpeg", "-y", "-i", paths.final_audio,
+                     "-codec:a", "libmp3lame", "-b:a", "192k", mp3_preview],
+                    capture_output=True, check=True,
+                )
+                audio_out = mp3_preview
+            except Exception:
+                pass  # fall back to original WAV
         if hasattr(paths, "final_video") and os.path.isfile(paths.final_video):
             video_out = paths.final_video
 

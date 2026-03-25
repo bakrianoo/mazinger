@@ -401,6 +401,51 @@ def list_themes() -> list[dict]:
     ]
 
 
+def _theme_profile_name(theme_name: str, language: str, gender: str) -> str:
+    """Build the HuggingFace profile directory name for a theme."""
+    return f"general-{language}-{gender}-{theme_name}"
+
+
+def _try_download_theme_profile(
+    profile_name: str,
+    cache_dir: str,
+) -> tuple[str, str] | None:
+    """Try to download a pre-generated theme profile from HuggingFace.
+
+    Returns ``(wav_path, script_path)`` on success, or ``None`` if the
+    remote profile does not exist.
+    """
+    profile_dir = os.path.join(cache_dir, "themes", profile_name)
+    wav_path = os.path.join(profile_dir, "voice.wav")
+    script_path = os.path.join(profile_dir, SCRIPT_FILENAME)
+
+    # Already downloaded previously
+    if (
+        os.path.isfile(wav_path) and os.path.getsize(wav_path) > 0
+        and os.path.isfile(script_path)
+    ):
+        log.info("Using cached remote theme profile: %s", profile_dir)
+        return wav_path, script_path
+
+    base_url = f"{PROFILES_REPO_URL}/general/{profile_name}"
+
+    try:
+        _download_file(f"{base_url}/{SCRIPT_FILENAME}", script_path)
+        _download_file(f"{base_url}/voice.wav", wav_path)
+        log.info("Downloaded theme profile from HuggingFace: %s", profile_name)
+        return wav_path, script_path
+    except HTTPError:
+        # Clean up partial downloads
+        for p in (wav_path, script_path):
+            if os.path.exists(p):
+                os.remove(p)
+        log.info(
+            "Theme profile %s not found on HuggingFace, will generate locally",
+            profile_name,
+        )
+        return None
+
+
 def resolve_theme(
     theme_name: str,
     language: str,
@@ -411,8 +456,13 @@ def resolve_theme(
 ) -> tuple[str, str]:
     """Return ``(voice_sample_path, ref_text)`` for a theme + language pair.
 
-    Uses the Qwen3-TTS VoiceDesign model to synthesise a reference clip
-    matching the theme's voice characteristics, then caches the result.
+    Resolution order:
+
+    1. **Local cache** — reuse a previously downloaded or generated file.
+    2. **HuggingFace** — download the pre-generated profile from
+       ``profiles/general/general-{lang}-{gender}-{theme}/``.
+    3. **Local generation** — synthesise with the Qwen3-TTS VoiceDesign
+       model and cache the result.
     """
     if theme_name not in VOICE_THEMES:
         raise ValueError(
@@ -434,6 +484,7 @@ def resolve_theme(
             tempfile.gettempdir(), "mazinger-dubber-profiles"
         )
 
+    # ── 1. Check local cache ────────────────────────────────────────
     theme_dir = os.path.join(cache_dir, "themes", theme_name)
     wav_path = os.path.join(theme_dir, f"{language}.wav")
 
@@ -441,6 +492,19 @@ def resolve_theme(
         log.info("Using cached voice theme: %s", wav_path)
         return wav_path, ref_text
 
+    # ── 2. Try downloading pre-generated profile from HuggingFace ───
+    hf_name = _theme_profile_name(theme_name, language, theme["gender"])
+    result = _try_download_theme_profile(hf_name, cache_dir)
+    if result is not None:
+        hf_wav, _ = result
+        # Copy into the standard theme cache location for future reuse
+        os.makedirs(theme_dir, exist_ok=True)
+        import shutil
+        shutil.copy2(hf_wav, wav_path)
+        log.info("Theme profile cached from HuggingFace: %s", wav_path)
+        return wav_path, ref_text
+
+    # ── 3. Fall back to local generation ────────────────────────────
     from mazinger.tts import design_voice
     import soundfile as sf
 
