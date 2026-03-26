@@ -69,6 +69,8 @@ PHASE_PATTERNS = [
     ("voice clone prompt created",  "⏳ Preparing voice clone…"),
     ("Reusing cached TTS",         "⏳ Preparing voice clone…"),
     ("Reusing saved voice profile", "⏳ Loading saved voice profile…"),
+    ("Reusing auto-cloned voice",   "⏳ Reusing auto-cloned voice profile…"),
+    ("Auto-cloned voice profile",   "⏳ Auto-cloning voice from source…"),
     ("Generating voice from theme", "⏳ Generating voice from theme… (VoiceDesign)"),
     ("VoiceDesign model loaded",   "⏳ Generating voice from theme… (VoiceDesign)"),
     ("Voice profile saved",        "⏳ Voice profile ready"),

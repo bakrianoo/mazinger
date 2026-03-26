@@ -154,7 +154,7 @@ with gr.Blocks(theme=theme, title="Mazinger Studio", css=CSS) as app:
                 scale=1,
             )
             voice_type = gr.Radio(
-                ["Voice Theme", "Preset Voice", "Custom Voice"],
+                ["Voice Theme", "Preset Voice", "Custom Voice", "Auto-Clone"],
                 value="Voice Theme",
                 label="Voice source",
                 scale=1,
@@ -218,15 +218,25 @@ with gr.Blocks(theme=theme, title="Mazinger Studio", css=CSS) as app:
                     scale=2,
                 )
 
+        # ── Auto-Clone (clone voice from source) ──
+        with gr.Group(visible=False) as autoclone_group:
+            gr.Markdown(
+                "The speaker's voice is cloned directly from the source audio. "
+                "No voice files or settings needed — the pipeline picks the "
+                "best 20-60 s segment automatically.",
+                elem_classes="openai-info",
+            )
+
     def _toggle_voice(choice):
         return (
             gr.update(visible=(choice == "Voice Theme")),
             gr.update(visible=(choice == "Preset Voice")),
             gr.update(visible=(choice == "Custom Voice")),
+            gr.update(visible=(choice == "Auto-Clone")),
         )
     voice_type.change(
         _toggle_voice, voice_type,
-        [theme_group, preset_group, custom_group],
+        [theme_group, preset_group, custom_group, autoclone_group],
     )
 
     # ── Advanced Settings ─────────────────────────────────────────

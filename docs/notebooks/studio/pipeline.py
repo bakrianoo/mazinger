@@ -93,7 +93,7 @@ def run_dubbing(
         return
 
     if output_type == "Dubbed Audio":
-        # Voice validation only needed for dubbing
+        # Voice validation only needed for dubbing (skip for Auto-Clone)
         if voice_type == "Preset Voice" and not voice_preset:
             yield "❌ Please select a voice preset.", *_empty[1:]
             return
@@ -411,15 +411,18 @@ def _run_full_dub(
     collector = LogCollector()
     maz_log = _setup_logging(collector)
 
-    yield ("⏳ Preparing voice profile…" if voice_type != "Voice Theme"
-           else "⏳ Voice theme selected — will generate on first run…"), "", None, None, None
+    yield ("⏳ Preparing voice profile…" if voice_type not in ("Voice Theme", "Auto-Clone")
+           else "⏳ Voice theme selected — will generate on first run…" if voice_type == "Voice Theme"
+           else "⏳ Auto-clone — voice will be extracted from source…"), "", None, None, None
 
     voice_sample_path = None
     voice_script_path = None
     voice_theme_key = None
 
     try:
-        if voice_type == "Voice Theme":
+        if voice_type == "Auto-Clone":
+            pass  # pipeline handles it when both sample and script are None
+        elif voice_type == "Voice Theme":
             voice_theme_key = THEME_KEY_MAP.get(voice_theme_label)
             if not voice_theme_key:
                 yield "❌ Unknown voice theme selected.", "", None, None, None
