@@ -60,6 +60,9 @@ class ProjectPaths:
         self.thumbs_meta = os.path.join(self.thumbnails_dir, "meta.json")
         self.description = os.path.join(self.analysis_dir, "description.json")
 
+        # Shared file paths (review is language-independent)
+        self.reviewed_srt = os.path.join(self.transcription_dir, "source.reviewed.srt")
+
         # Language-scoped file paths
         self.translated_raw_srt = os.path.join(_lang, "transcription", "translated.raw.srt")
         self.final_srt = os.path.join(self.subtitles_dir, "translated.srt")

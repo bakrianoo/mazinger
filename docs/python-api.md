@@ -61,6 +61,8 @@ proj = dubber.dub(
     words_per_second=None,            # float — speech rate for word budgets (default: 2.0)
     duration_budget=None,             # float — fraction of time for speech (default: 0.80)
     translate_technical_terms=False,   # bool — translate tech terms vs. keep in English
+    asr_review=False,                  # bool — review ASR transcript (fix typos, punctuation)
+    keep_technical_english=False,      # bool — convert technical terms to English (requires asr_review)
     loudness_match=True,              # bool — normalise dubbed loudness to original
     mix_background=True,              # bool — mix original background audio under dub
     background_volume=0.15,           # float — background layer gain (0.0–1.0)
@@ -234,6 +236,37 @@ from mazinger.utils import load_json
 thumbs = load_json("./thumbs/meta.json")
 desc = describe_content(srt_text, thumbs, client)
 # Returns: {"title": "...", "summary": "...", "keypoints": [...], "keywords": [...]}
+```
+
+### review
+
+```python
+from mazinger.review import review_srt
+
+reviewed = review_srt(
+    srt_text,
+    description=desc,
+    client=client,
+    source_language="auto",
+    keep_technical_english=False,
+)
+```
+
+Full signature:
+
+```python
+review_srt(
+    srt_text,              # str — source SRT content
+    description,           # dict — from describe_content
+    client,                # OpenAI client
+    *,
+    llm_model="gpt-4.1",
+    source_language="auto",
+    keep_technical_english=False,
+    blocks_per_batch=30,
+    overlap_size=6,
+    usage_tracker=None,    # LLMUsageTracker
+)
 ```
 
 ### translate

@@ -1,6 +1,6 @@
 # Pipeline Overview
 
-Mazinger processes video through nine stages. Each stage reads its inputs from the project directory and writes its outputs back, so stages can run independently or chain together.
+Mazinger processes video through ten stages. Each stage reads its inputs from the project directory and writes its outputs back, so stages can run independently or chain together.
 
 ## Stages
 
@@ -9,8 +9,12 @@ Mazinger processes video through nine stages. Each stage reads its inputs from t
  URL/file  ──▶ │ Download │──▶│ Transcribe  │──▶│ Thumbnails  │
                └──────────┘   └─────────────┘   └──────┬──────┘
                                                         │
+                                                 ┌──────▼──────┐
+                                                 │  Describe    │
+                                                 └──────┬──────┘
+                                                        │
                ┌───────────┐   ┌───────────┐   ┌───────▼──────┐
-               │ Re-segment│◀──│ Translate  │◀──│  Describe    │
+               │ Re-segment│◀──│ Translate  │◀──│   Review     │
                └─────┬─────┘   └───────────┘   └──────────────┘
                      │
                ┌─────▼─────┐   ┌───────────┐   ┌──────────────┐
@@ -67,7 +71,23 @@ This description is passed to the translation stage as context, so the LLM can p
 **Inputs:** `transcription/source.srt`, `thumbnails/meta.json`
 **Outputs:** `analysis/description.json`
 
-### 5. Translate
+### 5. Review (optional)
+
+Uses an LLM to review and refine the ASR-generated transcript. Enabled with `--asr-review` in the CLI or `asr_review=True` in the Python API.
+
+The review step:
+
+- Fixes obvious typos and misspellings (high confidence only)
+- Adds missing punctuation and reshapes existing punctuation
+- Corrects ASR word-boundary errors (words incorrectly split or merged)
+- Optionally converts technical terms to their standard English spelling (`--keep-technical-english`)
+
+The LLM receives the content description for context and processes subtitles in batches of 30 with 6-entry overlap. Each batch response is validated — if parsing fails, the original text is preserved.
+
+**Inputs:** `transcription/source.srt` (or `source.raw.srt`), `analysis/description.json`
+**Outputs:** `transcription/source.reviewed.srt`
+
+### 6. Translate
 
 Translates the SRT into the target language. Subtitles are processed in batches of 24 entries with an 8-entry overlap window for context continuity.
 
@@ -84,7 +104,7 @@ Thumbnails and the content description are included in the LLM prompt so transla
 **Inputs:** `transcription/source.srt`, `analysis/description.json`, `thumbnails/meta.json`
 **Outputs:** `transcription/translated.raw.srt`
 
-### 6. Re-segment
+### 7. Re-segment
 
 Reorganizes subtitle entries for readability and timing. Runs in two phases:
 
@@ -96,7 +116,7 @@ Default limits: 84 characters per entry, 4.0 seconds per entry (configurable).
 **Inputs:** `transcription/translated.raw.srt`
 **Outputs:** `subtitles/translated.srt`
 
-### 7. Speak
+### 8. Speak
 
 Generates a WAV file for each subtitle entry using voice-cloned TTS.
 
@@ -111,7 +131,7 @@ Each segment is saved individually (`seg_0001.wav`, `seg_0002.wav`, ...) so inte
 **Inputs:** `subtitles/translated.srt`, voice sample + optional transcript (or `--voice-theme`)
 **Outputs:** `tts/segments/seg_NNNN.wav`, optionally `voice_profile/voice.wav` and `voice_profile/script.txt`
 
-### 8. Assemble
+### 9. Assemble
 
 Places all segment WAVs onto a silence-filled timeline that matches the original audio duration. Optionally applies tempo adjustment using ffmpeg to make segments fit their allocated time windows.
 
@@ -134,7 +154,7 @@ Both can be disabled with `--no-loudness-match` and `--no-mix-background`. The b
 **Inputs:** `tts/segments/seg_NNNN.wav`, original audio duration, `source/audio.mp3`
 **Outputs:** `tts/dubbed.wav`
 
-### 9. Subtitle (optional)
+### 10. Subtitle (optional)
 
 Burns styled subtitles into the video using the ffmpeg `subtitles` filter. Can also replace the audio track with the dubbed version in the same encoding pass.
 
@@ -147,7 +167,7 @@ Supports font selection (system fonts, local files, or Google Fonts), color and 
 
 When you run the full `dub` command, data flows through the stages in order. Each stage reads from and writes to a well-defined set of paths inside the project directory. The `ProjectPaths` class manages all paths — see [Project Structure](project-structure.md).
 
-Stages that perform LLM calls (thumbnails, describe, translate, resegment-merge) record their token usage. After the pipeline finishes, a summary report is logged and the raw records are saved to `llm_usage.json`. See [Configuration](configuration.md#llm-usage-tracking) for details.
+Stages that perform LLM calls (thumbnails, describe, review, translate, resegment-merge) record their token usage. After the pipeline finishes, a summary report is logged and the raw records are saved to `llm_usage.json`. See [Configuration](configuration.md#llm-usage-tracking) for details.
 
 ## Resume and Caching
 

@@ -27,6 +27,10 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     add_subtitles(p)
     add_tempo(p)
     add_translation(p)
+    p.add_argument("--asr-review", action="store_true", default=False,
+                   help="Review ASR transcript with LLM to fix typos and punctuation.")
+    p.add_argument("--keep-technical-english", action="store_true", default=False,
+                   help="Convert technical terms to English in the source transcript (requires --asr-review).")
     p.add_argument("--no-loudness-match", action="store_true",
                    help="Skip loudness normalisation against the original audio.")
     p.add_argument("--no-mix-background", action="store_true",
@@ -89,6 +93,8 @@ def handler(args: argparse.Namespace) -> None:
         words_per_second=args.words_per_second,
         duration_budget=args.duration_budget,
         translate_technical_terms=args.translate_technical_terms,
+        asr_review=args.asr_review,
+        keep_technical_english=args.keep_technical_english,
         subtitle_style=subtitle_style,
         subtitle_source=args.subtitle_source,
         loudness_match=not args.no_loudness_match,

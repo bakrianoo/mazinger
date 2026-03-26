@@ -46,6 +46,8 @@ mazinger dub <source> [options]
 | `--words-per-second` | `2.0` | Speech rate used for duration-aware word budgets |
 | `--duration-budget` | `0.80` | Fraction of available time for dubbed speech |
 | `--translate-technical-terms` | off | Translate technical terms instead of keeping them in English |
+| `--asr-review` | off | Review ASR transcript with LLM to fix typos and punctuation |
+| `--keep-technical-english` | off | Convert technical terms to English in the source transcript (requires `--asr-review`) |
 | `--tts-engine` | `qwen` | `qwen` or `chatterbox` |
 | `--tts-model` | `Qwen/Qwen3-TTS-12Hz-1.7B-Base` | Qwen model ID |
 | `--chatterbox-model` | `ResembleAI/chatterbox` | Chatterbox model ID |
@@ -187,6 +189,8 @@ If `source` is provided, the video is downloaded first and its audio is transcri
 | `--max-duration` | `5.0` | Max seconds per subtitle entry |
 | `--no-resegment` | off | Skip the post-transcription resegmentation step |
 | `--refine` | off | Use LLM to add punctuation and fix misheard words |
+| `--asr-review` | off | Review transcript with LLM: fix typos, punctuation, and optionally normalise technical terms |
+| `--keep-technical-english` | off | Convert technical terms to English (requires `--asr-review`) |
 | `--llm-model` | `gpt-4.1` | LLM model for refinement |
 | `--llm-think` / `--no-llm-think` | — | Enable/disable LLM thinking mode |
 | `--openai-api-key` | `$OPENAI_API_KEY` | OpenAI API key (for cloud method) |

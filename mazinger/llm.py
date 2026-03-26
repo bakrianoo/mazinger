@@ -127,8 +127,10 @@ class _OllamaChatCompletions:
             "stream": False,
             "options": {"temperature": temperature},
         }
-        if self._think is not None:
-            body["think"] = self._think
+        # Per-call ``think`` overrides the client-level default.
+        think = _kwargs.get("think", self._think)
+        if think is not None:
+            body["think"] = think
 
         data = json.dumps(body).encode()
         req = urllib.request.Request(

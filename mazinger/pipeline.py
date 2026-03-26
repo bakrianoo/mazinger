@@ -95,6 +95,8 @@ class MazingerDubber:
         words_per_second: float | None = None,
         duration_budget: float | None = None,
         translate_technical_terms: bool = False,
+        asr_review: bool = False,
+        keep_technical_english: bool = False,
         output_type: str = "audio",
         subtitle_style=None,
         subtitle_source: str = "translated",
@@ -294,6 +296,24 @@ class MazingerDubber:
                 usage_tracker=usage_tracker,
             )
             save_json(description, proj.description)
+
+        # 4b. ASR review (optional) --------------------------------------
+        if asr_review:
+            if skip_existing and os.path.exists(proj.reviewed_srt):
+                log.info("Skipping ASR review (file exists)")
+                with open(proj.reviewed_srt, encoding="utf-8") as fh:
+                    source_srt_text = fh.read()
+            else:
+                from mazinger import review
+                source_srt_text = review.review_srt(
+                    source_srt_text, description, client,
+                    llm_model=self.llm_model,
+                    source_language=source_language,
+                    keep_technical_english=keep_technical_english,
+                    usage_tracker=usage_tracker,
+                )
+                with open(proj.reviewed_srt, "w", encoding="utf-8") as fh:
+                    fh.write(source_srt_text)
 
         # 5. Translate ---------------------------------------------------
         if skip_existing and os.path.exists(proj.translated_raw_srt):

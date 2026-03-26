@@ -27,6 +27,12 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     p.add_argument("--no-resegment", action="store_true", help="Skip resegmentation.")
     p.add_argument("--refine", action="store_true",
                    help="Use LLM to add punctuation and fix misheard words.")
+    p.add_argument("--asr-review", action="store_true", default=False,
+                   help="Review transcript with LLM to fix typos, punctuation, "
+                        "and optionally normalise technical terms.")
+    p.add_argument("--keep-technical-english", action="store_true", default=False,
+                   help="Convert technical terms to English in the transcript "
+                        "(requires --asr-review).")
     p.add_argument("--llm-model", default="gpt-4.1", help="LLM model for refinement.")
     add_openai(p)
     add_common(p)
@@ -66,3 +72,30 @@ def handler(args: argparse.Namespace) -> None:
         openai_base_url=args.openai_base_url,
     )
     print(f"SRT saved: {output}")
+
+    if args.asr_review:
+        from mazinger.llm import build_client
+        from mazinger.describe import describe_content
+        from mazinger.review import review_srt
+
+        with open(output, encoding="utf-8") as fh:
+            srt_text = fh.read()
+
+        client = build_client(
+            api_key=args.openai_api_key,
+            base_url=args.openai_base_url,
+        )
+
+        description = describe_content(
+            srt_text, [], client, llm_model=args.llm_model,
+        )
+
+        reviewed = review_srt(
+            srt_text, description, client,
+            llm_model=args.llm_model,
+            source_language=getattr(args, "language", "auto") or "auto",
+            keep_technical_english=args.keep_technical_english,
+        )
+        with open(output, "w", encoding="utf-8") as fh:
+            fh.write(reviewed)
+        print(f"ASR review applied: {output}")

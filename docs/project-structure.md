@@ -14,7 +14,7 @@ All output files are organized under a single root directory. Each video gets it
         ├── transcription/
         │   ├── source.raw.srt      # Raw transcription output
         │   ├── source.srt          # Cleaned and resegmented transcription
-        │   └── translated.raw.srt  # Translation before resegmentation
+        │   └── source.reviewed.srt # ASR-reviewed transcript (when --asr-review is used)
         ├── subtitles/
         │   └── translated.srt      # Final translated and resegmented subtitles
         ├── thumbnails/

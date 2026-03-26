@@ -17,17 +17,18 @@
 
 ## What It Does
 
-Mazinger chains nine stages into a single pipeline:
+Mazinger chains ten stages into a single pipeline:
 
 1. **Download** — fetch a video from a URL or ingest a local file, extract the audio track
 2. **Transcribe** — convert speech to SRT subtitles (OpenAI Whisper API, faster-whisper, or WhisperX)
 3. **Thumbnails** — use an LLM to pick key frames from the video for visual context
 4. **Describe** — analyze the transcript and thumbnails to produce a structured summary (title, key points, keywords)
-5. **Translate** — translate the SRT into another language with duration-aware word budgets
-6. **Re-segment** — merge fragments and split oversized subtitles for readability
-7. **Speak** — synthesize voice-cloned speech for every subtitle entry (Qwen3-TTS or Chatterbox), with 16 pre-defined voice themes or your own voice sample
-8. **Assemble** — place each audio segment on the original timeline with optional tempo adjustment, loudness matching, and background audio mixing
-9. **Subtitle** — burn styled subtitles into the video and/or mux the new audio track
+5. **Review** — optionally refine ASR output: fix typos, reshape punctuation, and convert technical terms to English
+6. **Translate** — translate the SRT into another language with duration-aware word budgets
+7. **Re-segment** — merge fragments and split oversized subtitles for readability
+8. **Speak** — synthesize voice-cloned speech for every subtitle entry (Qwen3-TTS or Chatterbox), with 16 pre-defined voice themes or your own voice sample
+9. **Assemble** — place each audio segment on the original timeline with optional tempo adjustment, loudness matching, and background audio mixing
+10. **Subtitle** — burn styled subtitles into the video and/or mux the new audio track
 
 Every stage can run independently or as part of the full pipeline. Interrupted runs resume automatically — completed stages and individual TTS segments are cached and skipped.
 
