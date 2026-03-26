@@ -2,18 +2,67 @@
 
 from __future__ import annotations
 
+import json
 import logging
+import re
 from typing import TYPE_CHECKING
 
+import json_repair
 from tqdm.auto import tqdm
 
-from mazinger.srt import parse_blocks, blocks_to_text, format_time, sanitize
+from mazinger.srt import parse_blocks, blocks_to_text, sanitize
 from mazinger.utils import make_image_content, LLMUsageTracker
 
 if TYPE_CHECKING:
     from openai import OpenAI
 
 log = logging.getLogger(__name__)
+
+# ── Patterns for cleaning common weak-LLM artifacts from translated text ─────
+
+# Timestamp tags: [MM:SS], [HH:MM:SS], [0:23], [12:05:03], [MM:SS.ms]
+_TIMESTAMP_TAG_RE = re.compile(r"\[\d{1,2}(?::\d{2}){1,2}(?:[.,]\d+)?\]")
+
+# Duration/target annotations echoed back: [duration: 4.0s | target: ~6 words]
+_DURATION_TAG_RE = re.compile(
+    r"\[duration:\s*[\d.]+s?\s*\|\s*target:\s*~?\d+\s*words?\]",
+    re.IGNORECASE,
+)
+
+# SRT timestamp arrows: 00:00:01,000 --> 00:00:05,000
+_SRT_ARROW_RE = re.compile(r"\d{2}:\d{2}:\d{2},\d{3}\s*-->\s*\d{2}:\d{2}:\d{2},\d{3}")
+
+# XML/HTML tags that LLMs commonly hallucinate
+_LLM_XML_TAG_RE = re.compile(
+    r"</?(?:index|translated[_ ]?text|original[_ ]?text|start|end|"
+    r"subtitle|entry|segment|translation|text|source|target|item|lang)>",
+    re.IGNORECASE,
+)
+
+# Markdown code fences
+_CODE_FENCE_RE = re.compile(r"```(?:json|srt|text)?")
+
+# Leading index prefix like "1." or "1:" at the very start of text
+_LEADING_INDEX_RE = re.compile(r"^\d+[.:]\s+")
+
+
+def _clean_llm_text(text: str) -> str:
+    """Strip common weak-LLM artifacts from a translated subtitle text.
+
+    Removes timestamp tags, duration annotations, SRT arrows, XML tags,
+    code fences, and leading index prefixes that weak models may echo back.
+    """
+    text = _TIMESTAMP_TAG_RE.sub("", text)
+    text = _DURATION_TAG_RE.sub("", text)
+    text = _SRT_ARROW_RE.sub("", text)
+    text = _LLM_XML_TAG_RE.sub("", text)
+    text = _CODE_FENCE_RE.sub("", text)
+    # Collapse whitespace before checking leading index (prior removals may
+    # leave leading spaces that prevent the anchor from matching).
+    text = re.sub(r"\s{2,}", " ", text).strip()
+    text = _LEADING_INDEX_RE.sub("", text)
+    return text.strip()
+
 
 SUPPORTED_LANGUAGES = (
     "Arabic",
@@ -119,10 +168,11 @@ def _build_system_prompt(
 
     return f"""\
 You are a professional {target_language} dubbing script writer for technical / \
-programming tutorial videos.{source_ctx} You are given SRT subtitles with duration \
-annotations, video screenshots, and a keyword/keypoint list. Produce natural, \
-well-phrased {target_language} dubbing scripts -- not a literal word-for-word \
-translation, but also NOT a compressed summary.
+programming tutorial videos.{source_ctx} You are given subtitle texts as a JSON \
+array (with index, text, and a target word count), video screenshots, and a \
+keyword/keypoint list. Produce natural, well-phrased {target_language} dubbing \
+scripts -- not a literal word-for-word translation, but also NOT a compressed \
+summary.
 
 QUALITY GOALS:
 - The {target_language} must sound like a fluent {target_language}-speaking instructor \
@@ -139,7 +189,8 @@ QUALITY GOALS:
   repetition.
 
 DURATION MATCHING (CRITICAL FOR DUBBING):
-- Each entry includes a [duration: Xs | target: ~N words] annotation.
+- Each entry has a "target_words" field — the maximum number of words for \
+  your translation.
 - The target word count is already set to ~{budget_pct}% of the available time window \
   (at ~{words_per_second} {target_language} words/second). This {budget_pct}% budget ensures the generated \
   dubbed voice finishes naturally BEFORE the next segment starts, leaving \
@@ -147,8 +198,7 @@ DURATION MATCHING (CRITICAL FOR DUBBING):
 - Your translation for each entry MUST stay WITHIN the target word count. \
   Do NOT exceed it -- going over causes the dubbed audio to be cut off \
   mid-sentence.
-- Example: a [duration: {example_dur:.1f}s | target: ~{example_target} words] entry needs around {example_target} \
-  words.
+- Example: a "target_words": {example_target} entry needs around {example_target} words.
 - Aim for 90-100% of the target word count. Significantly fewer words \
   create awkward silences; more words cause cut-off speech.
 - If the original content is too dense for the word budget, prioritise the \
@@ -158,28 +208,23 @@ DURATION MATCHING (CRITICAL FOR DUBBING):
   natural, fluent delivery.
 
 STRUCTURAL RULES:
-1. Translate EVERY subtitle entry in the MAIN BLOCK. Do NOT skip, merge, \
-   split, or reorder entries.
-2. Keep the EXACT SRT index numbers and timestamps -- only replace the \
-   source text with {target_language}. Remove the [duration/target] \
-   annotations from your output.
+1. Translate EVERY entry in the MAIN BLOCK. Do NOT skip, merge, split, or \
+   reorder entries.
+2. Return a JSON array of objects, one per input entry, in the SAME order. \
+   Each object must have exactly two keys: \
+   "index" (the original index) and "text" (the translated {target_language} text).
 3. {_technical_terms_instruction(kw_examples, target_language, translate_technical_terms)}
 4. The video covers: {kp_summary}. Use this to disambiguate unclear references.
-5. Return ONLY the translated SRT block for the MAIN BLOCK entries -- \
-   no fences, no commentary, no XML tags.
-6. Each subtitle entry must use standard SRT format, for example:
+5. Return ONLY the JSON array -- no markdown fences, no commentary, no XML \
+   tags, no timestamps, no SRT formatting.
 
-   1
-   00:00:01,000 --> 00:00:05,000
-   Translated sentence here.
+EXAMPLE OUTPUT:
+[
+  {{"index": "1", "text": "Translated sentence here."}},
+  {{"index": "2", "text": "Next translated sentence."}}
+]
 
-   2
-   00:00:05,100 --> 00:00:09,500
-   Next translated sentence.
-
-   Do NOT wrap entries in tags like <index>, <translated text>, etc.
-
-You will receive CONTEXT BEFORE and CONTEXT AFTER sections. They are for \
+You may receive CONTEXT BEFORE and CONTEXT AFTER sections. They are for \
 reference only -- translate and return ONLY the MAIN BLOCK entries."""
 
 
@@ -206,21 +251,32 @@ def _technical_terms_instruction(
     )
 
 
-def _blocks_to_annotated_text(
+def _blocks_to_json_entries(
     blocks: list[tuple[str, float, float, str]],
     words_per_second: float = WORDS_PER_SECOND,
     duration_budget: float = DURATION_BUDGET,
 ) -> str:
-    """Like ``blocks_to_text`` but adds duration & word-count annotations."""
-    parts: list[str] = []
+    """Convert blocks to a JSON array of {index, text, target_words} for LLM input."""
+    entries = []
     for idx, start, end, text in blocks:
         dur = end - start
         target_words = max(1, round(dur * words_per_second * duration_budget))
-        parts.append(
-            f"{idx}\n{format_time(start)} --> {format_time(end)}\n"
-            f"[duration: {dur:.1f}s | target: ~{target_words} words]\n{text}\n"
-        )
-    return "\n".join(parts)
+        entries.append({
+            "index": idx,
+            "text": text,
+            "target_words": target_words,
+        })
+    return json.dumps(entries, ensure_ascii=False, indent=2)
+
+
+def _blocks_to_context_text(
+    blocks: list[tuple[str, float, float, str]],
+) -> str:
+    """Convert blocks to a simple numbered text list for LLM context (no timestamps)."""
+    lines = []
+    for idx, _start, _end, text in blocks:
+        lines.append(f'{idx}: "{text.strip()}"')
+    return "\n".join(lines)
 
 
 def _find_thumbnails_for_range(
@@ -236,7 +292,7 @@ def _find_thumbnails_for_range(
 
 def _build_messages(
     system_prompt: str,
-    srt_batch: str,
+    batch_json: str,
     batch_thumbs: list[dict],
     keypoints: list[str],
     keywords: list[str],
@@ -264,12 +320,12 @@ def _build_messages(
             user_parts.append({"type": "text", "text": f"  [{tp['timestamp']}] {tp['reason']}"})
             user_parts.append(make_image_content(tp["path"]))
 
-    srt_payload = ""
+    payload = ""
     if context_before:
-        srt_payload += "== CONTEXT BEFORE (do NOT translate) ==\n" + context_before + "\n\n"
-    srt_payload += "== MAIN BLOCK (translate these entries) ==\n" + srt_batch
+        payload += "== CONTEXT BEFORE (do NOT translate, for reference only) ==\n" + context_before + "\n\n"
+    payload += "== MAIN BLOCK (translate these entries) ==\n" + batch_json
     if context_after:
-        srt_payload += "\n\n== CONTEXT AFTER (do NOT translate) ==\n" + context_after
+        payload += "\n\n== CONTEXT AFTER (do NOT translate, for reference only) ==\n" + context_after
 
     user_parts.append({
         "type": "text",
@@ -278,15 +334,74 @@ def _build_messages(
             "suitable for dubbing. Use CONTEXT BEFORE/AFTER for surrounding context "
             "but ONLY return translations for the MAIN BLOCK. Use the screenshots "
             "and context to resolve vague or incomplete references.\n"
-            "Keep index numbers and timestamps EXACTLY as-is. "
-            "Match the target word count shown in each entry's [duration/target] "
-            "annotation -- this is critical for dubbing timing.\n\n"
-            + srt_payload
+            "Match the target_words count for each entry -- this is critical for "
+            "dubbing timing.\n"
+            "Return a JSON array of {\"index\": ..., \"text\": ...} objects in order.\n\n"
+            + payload
         ),
     })
 
     msgs.append({"role": "user", "content": user_parts})
     return msgs
+
+
+def _parse_translation_response(
+    raw_content: str,
+    core_blocks: list[tuple[str, float, float, str]],
+) -> list[tuple[str, float, float, str]]:
+    """Parse LLM JSON response and reconstruct blocks with original timestamps.
+
+    Falls back to treating the response as raw SRT if JSON parsing fails,
+    and ultimately falls back to keeping original text if nothing works.
+    """
+    # Try JSON parse first (expected path)
+    try:
+        translations = json_repair.loads(raw_content)
+        if isinstance(translations, list) and translations:
+            result: list[tuple[str, float, float, str]] = []
+            # Build index -> translated text map (clean artifacts)
+            trans_map: dict[str, str] = {}
+            for item in translations:
+                if isinstance(item, dict) and "index" in item and "text" in item:
+                    trans_map[str(item["index"])] = _clean_llm_text(
+                        str(item["text"])
+                    )
+
+            # Reconstruct blocks in original order with original timestamps
+            for idx, start, end, original_text in core_blocks:
+                translated_text = trans_map.get(idx, "")
+                if translated_text:
+                    result.append((idx, start, end, translated_text))
+                else:
+                    log.warning("Missing translation for index %s, keeping original", idx)
+                    result.append((idx, start, end, original_text))
+
+            if len(result) == len(core_blocks):
+                return result
+            log.warning(
+                "JSON translation count mismatch: expected %d, got %d",
+                len(core_blocks), len(result),
+            )
+    except Exception:
+        pass
+
+    # Fallback: try parsing as SRT (in case LLM ignored JSON instruction)
+    log.warning("JSON parse failed, attempting SRT fallback parse")
+    translated_srt_blocks = parse_blocks(sanitize(raw_content))
+    if translated_srt_blocks:
+        result = []
+        srt_map = {b[0]: _clean_llm_text(b[3]) for b in translated_srt_blocks}
+        for idx, start, end, original_text in core_blocks:
+            translated_text = srt_map.get(idx, "")
+            if translated_text:
+                result.append((idx, start, end, translated_text))
+            else:
+                result.append((idx, start, end, original_text))
+        return result
+
+    # Last resort: return original blocks unchanged
+    log.warning("All parsing failed, returning original text for batch")
+    return list(core_blocks)
 
 
 def translate_srt(
@@ -346,11 +461,10 @@ def translate_srt(
         batch_ranges.append((i, min(i + blocks_per_batch, len(all_blocks))))
 
     half_overlap = overlap_size // 2
-    translated_parts: list[str] = []
+    translated_blocks: list[tuple[str, float, float, str]] = []
 
     for batch_idx, (core_start, core_end) in enumerate(tqdm(batch_ranges, desc="Translating")):
         core_blocks = all_blocks[core_start:core_end]
-        core_indices = {b[0] for b in core_blocks}
 
         ctx_before_start = max(0, core_start - half_overlap)
         ctx_after_end = min(len(all_blocks), core_end + half_overlap)
@@ -358,13 +472,15 @@ def translate_srt(
         before_blocks = all_blocks[ctx_before_start:core_start]
         after_blocks = all_blocks[core_end:ctx_after_end]
 
-        batch_srt = _blocks_to_annotated_text(
+        # Build JSON payload — no timestamps sent to LLM
+        batch_json = _blocks_to_json_entries(
             core_blocks,
             words_per_second=words_per_second,
             duration_budget=duration_budget,
         )
-        context_before = blocks_to_text(before_blocks) if before_blocks else ""
-        context_after = blocks_to_text(after_blocks) if after_blocks else ""
+        # Context blocks as simple numbered text (no timestamps)
+        context_before = _blocks_to_context_text(before_blocks) if before_blocks else ""
+        context_after = _blocks_to_context_text(after_blocks) if after_blocks else ""
 
         full_start = before_blocks[0][1] if before_blocks else core_blocks[0][1]
         full_end = after_blocks[-1][2] if after_blocks else core_blocks[-1][2]
@@ -377,7 +493,7 @@ def translate_srt(
         )
 
         msgs = _build_messages(
-            system_prompt, batch_srt, batch_thumbs,
+            system_prompt, batch_json, batch_thumbs,
             keypoints, keywords, context_before, context_after,
             target_language=target_language,
         )
@@ -386,25 +502,16 @@ def translate_srt(
         )
         if usage_tracker is not None:
             usage_tracker.record("translate", llm_model, resp)
-        translated_batch = sanitize(resp.choices[0].message.content.strip())
 
-        # Filter to only core indices
-        translated_blocks = parse_blocks(translated_batch)
-        filtered = [b for b in translated_blocks if b[0] in core_indices]
+        # Parse JSON response and reconstruct SRT with original timestamps
+        raw_content = resp.choices[0].message.content.strip()
+        batch_translated = _parse_translation_response(raw_content, core_blocks)
+        translated_blocks.extend(batch_translated)
 
-        if len(filtered) != len(core_blocks):
-            log.warning(
-                "Batch %d: expected %d entries, got %d (raw=%d). Using raw output.",
-                batch_idx + 1, len(core_blocks), len(filtered), len(translated_blocks),
-            )
-            translated_parts.append(translated_batch)
-        else:
-            translated_parts.append(blocks_to_text(filtered))
-
-    result = sanitize("\n\n".join(translated_parts))
+    result = blocks_to_text(translated_blocks)
 
     original_count = len(all_blocks)
-    translated_count = len(parse_blocks(result))
+    translated_count = len(translated_blocks)
     log.info("Translation complete: %d -> %d entries", original_count, translated_count)
     if original_count != translated_count:
         log.warning("Entry count mismatch: %d original vs %d translated", original_count, translated_count)

@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 import json_repair
 from PIL import Image
 
-from mazinger.srt import parse_blocks, blocks_to_text
+from mazinger.srt import parse_blocks
 from mazinger.utils import estimate_tokens, LLMUsageTracker
 
 if TYPE_CHECKING:
@@ -23,10 +23,10 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _TIMESTAMP_SYSTEM = """\
-You are an expert video analyst. You will receive an SRT subtitle file (or a \
-segment of one) from a tutorial / educational video. Your job is to select \
-timestamps where extracting a screenshot would add meaningful visual context \
-that the subtitles alone cannot convey.
+You are an expert video analyst. You will receive a timestamped subtitle list \
+from a tutorial / educational video (format: [MM:SS] text). Your job is to \
+select timestamps where extracting a screenshot would add meaningful visual \
+context that the subtitles alone cannot convey.
 
 Good reasons to pick a timestamp:
 - The speaker shows a code editor, terminal, browser, or UI.
@@ -52,16 +52,32 @@ _BATCH_MINUTES = 5
 _OVERLAP_SECONDS = 30
 
 
+def _blocks_to_simple_timed_text(
+    blocks: list[tuple[str, float, float, str]],
+) -> str:
+    """Convert blocks to ``[MM:SS] text`` format for LLM input (no SRT formatting)."""
+    lines = []
+    for _idx, start, _end, text in blocks:
+        m, s = divmod(int(start), 60)
+        h, m = divmod(m, 60)
+        if h:
+            ts = f"{h:d}:{m:02d}:{s:02d}"
+        else:
+            ts = f"{m:d}:{s:02d}"
+        lines.append(f"[{ts}] {text.strip()}")
+    return "\n".join(lines)
+
+
 def _request_timestamps(
     client: OpenAI,
-    srt_segment: str,
+    timed_text: str,
     segment_label: str = "",
     llm_model: str = "gpt-4.1",
     usage_tracker: LLMUsageTracker | None = None,
 ) -> list[dict]:
     label = f" (segment: {segment_label})" if segment_label else ""
     user_msg = (
-        f"Here is the SRT file{label}:\n\n{srt_segment}\n\n"
+        f"Here are the timestamped subtitles{label}:\n\n{timed_text}\n\n"
         "Return the JSON array of timestamps."
     )
     resp = client.chat.completions.create(
@@ -150,11 +166,12 @@ def select_timestamps(
         return []
 
     total_end = max(b[2] for b in blocks)
-    est = estimate_tokens(srt_text)
-    log.info("Estimated SRT tokens: ~%d", est)
+    timed_text = _blocks_to_simple_timed_text(blocks)
+    est = estimate_tokens(timed_text)
+    log.info("Estimated timed-text tokens: ~%d", est)
 
     if est <= _TOKEN_THRESHOLD:
-        timestamps = _request_timestamps(client, srt_text, llm_model=llm_model,
+        timestamps = _request_timestamps(client, timed_text, llm_model=llm_model,
                                          usage_tracker=usage_tracker)
         timestamps = _validate_timestamps(timestamps, total_end)
         if timestamps:
@@ -176,11 +193,11 @@ def select_timestamps(
             continue
 
         batch_num += 1
-        segment_srt = blocks_to_text(batch_blocks)
+        segment_text = _blocks_to_simple_timed_text(batch_blocks)
         label = f"{batch_blocks[0][1] / 60:.0f}min-{batch_blocks[-1][2] / 60:.0f}min"
         log.info("Batch %d: %s (%d subtitles)", batch_num, label, len(batch_blocks))
 
-        batch_ts = _request_timestamps(client, segment_srt, segment_label=label,
+        batch_ts = _request_timestamps(client, segment_text, segment_label=label,
                                          llm_model=llm_model, usage_tracker=usage_tracker)
         all_timestamps.extend(batch_ts)
         window_start += batch_sec

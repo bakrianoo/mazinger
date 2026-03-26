@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 import json_repair
 
+from mazinger.srt import parse_blocks
 from mazinger.utils import make_image_content, LLMUsageTracker
 
 if TYPE_CHECKING:
@@ -17,7 +18,7 @@ log = logging.getLogger(__name__)
 _DESCRIBE_SYSTEM = """\
 You are an expert technical content analyst. You will be given:
 1. Screenshots (thumbnails) from a tutorial video with their timestamps.
-2. The full SRT subtitle file of the video.
+2. The subtitle texts from the video (as a numbered list).
 
 Produce a structured JSON object with:
 - "title": concise English title
@@ -61,7 +62,11 @@ def describe_content(
         user_parts.append({"type": "text", "text": f"[{tp['timestamp']}] {tp['reason']}"})
         user_parts.append(make_image_content(tp["path"]))
 
-    user_parts.append({"type": "text", "text": f"\n\nFull SRT:\n\n{srt_text}"})
+    # Send only subtitle texts — timestamps are irrelevant for content analysis
+    blocks = parse_blocks(srt_text)
+    numbered_lines = [f"{idx}. {text.strip()}" for idx, _s, _e, text in blocks]
+    texts_only = "\n".join(numbered_lines)
+    user_parts.append({"type": "text", "text": f"\n\nSubtitle texts:\n\n{texts_only}"})
     user_parts.append({
         "type": "text",
         "text": "\nReturn the JSON object with title, summary, keypoints, and keywords.",
