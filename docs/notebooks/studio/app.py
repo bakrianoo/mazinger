@@ -295,6 +295,11 @@ with gr.Blocks(theme=theme, title="Mazinger Studio", css=CSS) as app:
                     label="Model override",
                     placeholder="whisper-1 (cloud) / large-v3 (local)",
                 )
+                youtube_subs = gr.Checkbox(
+                    label="Use YouTube subtitles",
+                    value=False,
+                    info="Download YouTube captions and compare with ASR to pick the best source",
+                )
 
             with gr.Tab("🌐 Translation"):
                 source_language = gr.Dropdown(
@@ -510,6 +515,7 @@ with gr.Blocks(theme=theme, title="Mazinger Studio", css=CSS) as app:
             tempo_mode, max_tempo, loudness_match, mix_background, background_volume,
             output_type, force_reset,
             stream_llm,
+            youtube_subs,
         ],
         outputs=[status, logs, llm_stream_box, audio_output, srt_output, render_state],
     ).then(

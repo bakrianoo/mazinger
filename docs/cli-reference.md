@@ -48,6 +48,7 @@ mazinger dub <source> [options]
 | `--translate-technical-terms` | off | Translate technical terms instead of keeping them in English |
 | `--asr-review` | off | Review ASR transcript with LLM to fix typos and punctuation |
 | `--keep-technical-english` | off | Convert technical terms to English in the source transcript (requires `--asr-review`) |
+| `--youtube-subs` | off | Download YouTube subtitles and compare with ASR to pick the best source |
 | `--tts-engine` | `qwen` | `qwen` or `chatterbox` |
 | `--tts-model` | `Qwen/Qwen3-TTS-12Hz-1.7B-Base` | Qwen model ID |
 | `--chatterbox-model` | `ResembleAI/chatterbox` | Chatterbox model ID |
@@ -189,6 +190,8 @@ If `source` is provided, the video is downloaded first and its audio is transcri
 | `--compute-type` | `float16` | Weight precision: `float16`, `int8`, `int8_float16` |
 | `--beam-size` | `5` | Beam size for decoding (default: 5) |
 | `--language` | auto-detect | Force a language code (e.g., `en`, `ar`, `fr`) |
+| `--initial-prompt` | — | Initial text to condition Whisper (e.g., domain terms, video title) |
+| `--no-condition-on-previous-text` | off | Disable conditioning on previous segment text |
 | `--max-chars` | `84` | Max characters per subtitle entry |
 | `--max-duration` | `5.0` | Max seconds per subtitle entry |
 | `--no-resegment` | off | Skip the post-transcription resegmentation step |

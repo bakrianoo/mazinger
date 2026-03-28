@@ -28,6 +28,46 @@ TranscribeMethod = Literal["openai", "faster-whisper", "whisperx"]
 _whisper_cache: dict[str, Any] = {}
 
 
+def build_initial_prompt(video_meta: dict | None) -> str | None:
+    """Build a Whisper initial prompt from video metadata.
+
+    Whisper uses the initial prompt to condition its decoder on expected
+    vocabulary — domain-specific terms, channel names, and topic keywords
+    that appear in the title/description are far less likely to be misheard.
+
+    Returns ``None`` when there is nothing useful to include.
+    """
+    if not video_meta:
+        return None
+
+    parts: list[str] = []
+    title = video_meta.get("title", "").strip()
+    if title:
+        parts.append(title)
+
+    # Add the first 200 chars of description (enough for topic context,
+    # avoids bloating the prompt with links/timestamps/etc.)
+    desc = video_meta.get("description", "").strip()
+    if desc:
+        # Take first paragraph or first 200 chars, whichever is shorter
+        first_para = desc.split("\n\n")[0].strip()
+        parts.append(first_para[:200])
+
+    tags = video_meta.get("tags")
+    if tags and isinstance(tags, list):
+        parts.append(", ".join(tags[:15]))
+
+    if not parts:
+        return None
+
+    prompt = ". ".join(parts)
+    # Whisper initial_prompt is limited to 224 tokens (~800 chars);
+    # truncate to stay safely within that window.
+    if len(prompt) > 800:
+        prompt = prompt[:800]
+    return prompt
+
+
 def clear_cache() -> None:
     """Remove all cached Whisper models and free GPU memory."""
     if not _whisper_cache:
@@ -340,6 +380,64 @@ def _transcribe_openai(
              len(raw_segments), detected_lang)
     return raw_segments, detected_lang
 
+# ── Audio preprocessing ───────────────────────────────────────────────────────
+
+def _preprocess_audio(audio_path: str) -> str:
+    """Convert audio to 16 kHz mono WAV — the native Whisper input format.
+
+    Whisper was trained on 16 kHz mono audio.  Feeding it an MP3 or a stereo
+    file forces an internal resample that can introduce artefacts (especially
+    with lossy codecs).  Doing the conversion once up-front with ffmpeg
+    produces a clean, lossless input and avoids redundant work inside every
+    backend.
+
+    Returns the path to the preprocessed WAV (placed next to the original).
+    If the file is already 16 kHz mono WAV, it is returned unchanged.
+    """
+    import subprocess
+
+    # Quick probe: skip conversion if file is already 16 kHz mono WAV
+    if audio_path.lower().endswith(".wav"):
+        try:
+            probe = subprocess.run(
+                [
+                    "ffprobe", "-v", "error",
+                    "-select_streams", "a:0",
+                    "-show_entries", "stream=sample_rate,channels",
+                    "-of", "csv=p=0",
+                    audio_path,
+                ],
+                capture_output=True, text=True, check=True,
+            )
+            parts = probe.stdout.strip().split(",")
+            if len(parts) == 2 and parts[0].strip() == "16000" and parts[1].strip() == "1":
+                log.debug("Audio already 16 kHz mono WAV — skipping preprocessing")
+                return audio_path
+        except (subprocess.CalledProcessError, Exception):
+            pass  # fall through to conversion
+
+    base, _ = os.path.splitext(audio_path)
+    wav_path = f"{base}_16k.wav"
+    if os.path.exists(wav_path):
+        log.debug("Preprocessed audio already exists: %s", wav_path)
+        return wav_path
+
+    log.info("Preprocessing audio → 16 kHz mono WAV: %s", wav_path)
+    subprocess.run(
+        [
+            "ffmpeg", "-y", "-i", audio_path,
+            "-ac", "1",               # mono
+            "-ar", "16000",            # 16 kHz
+            "-sample_fmt", "s16",      # 16-bit PCM
+            "-c:a", "pcm_s16le",       # WAV codec
+            wav_path,
+        ],
+        check=True,
+        capture_output=True,
+    )
+    return wav_path
+
+
 # ── faster-whisper local backend ──────────────────────────────────────────────────
 
 def _transcribe_faster_whisper(
@@ -351,6 +449,8 @@ def _transcribe_faster_whisper(
     compute_type: str = "float16",
     language: str | None = None,
     beam_size: int = 5,
+    initial_prompt: str | None = None,
+    condition_on_previous_text: bool = True,
     vad_options: dict | None = None,
 ) -> tuple[list[dict], str]:
     """Transcribe using faster-whisper (CTranslate2).
@@ -371,6 +471,9 @@ def _transcribe_faster_whisper(
             "faster-whisper not installed. Install with: pip install 'mazinger-dubber[transcribe-faster]'\n"
             "Or use method='openai' for cloud-based transcription."
         ) from e
+
+    # ── Audio preprocessing: convert to 16 kHz mono WAV ───────────
+    audio_path = _preprocess_audio(audio_path)
 
     log.info(
         "Transcribing with faster-whisper (model=%s, device=%s, batch=%d, compute=%s)",
@@ -412,11 +515,19 @@ def _transcribe_faster_whisper(
     duration_s = audio_samples / sampling_rate
 
     chunk_length = whisper_model.feature_extractor.chunk_length
-    # Start with the same defaults the batched pipeline uses internally,
-    # then layer any caller-supplied overrides on top.
+    # Start with defaults tuned for transcription quality over speed.
+    # - min_silence_duration_ms=500 avoids splitting mid-word on
+    #   short pauses (the original 160ms was too aggressive).
+    # - speech_pad_ms=200 adds a small buffer around each detected
+    #   speech region so word onsets/offsets aren't clipped.
+    # - threshold=0.35 (lower than default 0.5) makes VAD more
+    #   sensitive, reducing missed speech at the cost of a few more
+    #   false positives (which Whisper will harmlessly decode as silence).
     vad_kw: dict = {
         "max_speech_duration_s": chunk_length,
-        "min_silence_duration_ms": 160,
+        "min_silence_duration_ms": 500,
+        "speech_pad_ms": 200,
+        "threshold": 0.35,
     }
     if vad_options:
         vad_kw.update(vad_options)
@@ -463,16 +574,30 @@ def _transcribe_faster_whisper(
     # Use batched inference for better performance
     batched_model = BatchedInferencePipeline(model=whisper_model)
 
-    # Transcribe with pre-computed (guarded) VAD clips.
-    # Passing clip_timestamps bypasses the pipeline's internal VAD.
-    segments_gen, info = batched_model.transcribe(
-        audio,
-        batch_size=batch_size,
-        language=language,
-        beam_size=beam_size,
-        word_timestamps=True,
-        clip_timestamps=speech_clips_sec,
-    )
+    # ── Transcription parameters matching OpenAI Whisper behaviour ─
+    # OpenAI's Whisper uses temperature fallback: it starts at 0.0
+    # and retries with higher temperatures if decoding quality is poor
+    # (high compression ratio or low avg log-prob).  We replicate the
+    # same strategy here.
+    transcribe_kw: dict[str, Any] = {
+        "batch_size": batch_size,
+        "language": language,
+        "beam_size": beam_size,
+        "word_timestamps": True,
+        "clip_timestamps": speech_clips_sec,
+        "condition_on_previous_text": condition_on_previous_text,
+        # Temperature fallback: try 0.0 first, then escalate.
+        # Matches openai/whisper default behaviour.
+        "temperature": [0.0, 0.2, 0.4, 0.6, 0.8, 1.0],
+        # Thresholds that trigger a temperature retry
+        "compression_ratio_threshold": 2.4,
+        "log_prob_threshold": -1.0,
+        "no_speech_threshold": 0.6,
+    }
+    if initial_prompt:
+        transcribe_kw["initial_prompt"] = initial_prompt
+
+    segments_gen, info = batched_model.transcribe(audio, **transcribe_kw)
 
     detected_lang = info.language or "unknown"
     log.info("Detected language: %s (probability: %.2f)", detected_lang, info.language_probability)
@@ -654,6 +779,8 @@ def transcribe(
     llm_model: str = "gpt-4.1",
     openai_api_key: str | None = None,
     openai_base_url: str | None = None,
+    initial_prompt: str | None = None,
+    condition_on_previous_text: bool = True,
     vad_options: dict | None = None,
 ) -> str:
     """Transcribe audio to SRT using OpenAI Whisper API, faster-whisper, or WhisperX.
@@ -714,6 +841,8 @@ def transcribe(
             compute_type=compute_type,
             language=language,
             beam_size=beam_size,
+            initial_prompt=initial_prompt,
+            condition_on_previous_text=condition_on_previous_text,
             vad_options=vad_options,
         )
     elif method == "whisperx":

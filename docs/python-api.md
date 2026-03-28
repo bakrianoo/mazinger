@@ -63,6 +63,7 @@ proj = dubber.dub(
     translate_technical_terms=False,   # bool — translate tech terms vs. keep in English
     asr_review=False,                  # bool — review ASR transcript (fix typos, punctuation)
     keep_technical_english=False,      # bool — convert technical terms to English (requires asr_review)
+    use_youtube_subs=False,            # bool — download YouTube captions and compare with ASR
     loudness_match=True,              # bool — normalise dubbed loudness to original
     mix_background=True,              # bool — mix original background audio under dub
     background_volume=0.15,           # float — background layer gain (0.0–1.0)

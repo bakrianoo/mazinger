@@ -78,6 +78,7 @@ def run_dubbing(
     tempo_mode, max_tempo, loudness_match, mix_background, background_volume,
     output_type, force_reset,
     stream_llm,
+    youtube_subs=False,
 ):
     """Generator → yields (status, logs, llm_stream, audio, srt_file, render_paths) tuples."""
 
@@ -126,6 +127,7 @@ def run_dubbing(
             source_language, words_per_second, duration_budget, translate_technical,
             output_type, force_reset,
             stream_llm,
+            youtube_subs,
         )
         return
 
@@ -143,6 +145,7 @@ def run_dubbing(
         tempo_mode, max_tempo, loudness_match, mix_background, background_volume,
         force_reset,
         stream_llm,
+        youtube_subs,
     )
 
 
@@ -159,6 +162,7 @@ def _run_subtitles(
     source_language, words_per_second, duration_budget, translate_technical,
     output_type, force_reset,
     stream_llm,
+    youtube_subs=False,
 ):
     """Generator → yields (status, logs, llm_stream, audio, srt_file, render_paths) tuples."""
 
@@ -195,8 +199,9 @@ def _run_subtitles(
 
             # Resolve slug
             is_remote = source_type == "YouTube URL"
+            _yt_info = None
             if is_remote:
-                slug, _ = dl.resolve_slug(
+                slug, _yt_info = dl.resolve_slug(
                     source, **({"cookies": _cookies_path} if _cookies_path else {}),
                 )
             else:
@@ -205,6 +210,10 @@ def _run_subtitles(
             proj = ProjectPaths(
                 slug, target_language=target_language,
             ).ensure_dirs()
+
+            # Save video metadata when available
+            if _yt_info and not os.path.exists(proj.video_meta):
+                dl.save_video_meta(_yt_info, proj.video_meta)
 
             skip = not force_reset
 
@@ -240,6 +249,13 @@ def _run_subtitles(
                 m = METHOD_MAP.get(transcribe_method, "faster-whisper")
                 if is_ollama and m == "openai":
                     m = "faster-whisper"
+
+                # Build initial prompt from video metadata (title, tags…)
+                from mazinger.transcribe import build_initial_prompt
+                from mazinger.utils import load_json as _load_json
+                _video_meta = _load_json(proj.video_meta) if os.path.exists(proj.video_meta) else None
+                _initial_prompt = build_initial_prompt(_video_meta)
+
                 do_transcribe(
                     proj.audio, proj.source_srt,
                     method=m,
@@ -247,6 +263,7 @@ def _run_subtitles(
                     device=device,
                     openai_api_key=_api_key,
                     openai_base_url=_base_url,
+                    initial_prompt=_initial_prompt,
                 )
 
             # Build LLM client (needed for ASR review and translation)
@@ -422,6 +439,7 @@ def _run_full_dub(
     tempo_mode, max_tempo, loudness_match, mix_background, background_volume,
     force_reset,
     stream_llm,
+    youtube_subs=False,
 ):
     """Generator → yields (status, logs, llm_stream, audio, srt_file, render_paths) tuples."""
 
@@ -511,6 +529,7 @@ def _run_full_dub(
                 background_volume=background_volume,
                 translate_technical_terms=translate_technical,
                 asr_review=True,
+                use_youtube_subs=youtube_subs,
                 **(dict(cookies=_cookies_path) if _cookies_path else {}),
             )
 

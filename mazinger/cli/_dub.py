@@ -31,6 +31,8 @@ def register(subparsers: argparse._SubParsersAction) -> None:
                    help="Review ASR transcript with LLM to fix typos and punctuation.")
     p.add_argument("--keep-technical-english", action="store_true", default=False,
                    help="Convert technical terms to English in the source transcript (requires --asr-review).")
+    p.add_argument("--youtube-subs", action="store_true", default=False,
+                   help="Download YouTube subtitles and compare with ASR to pick the best source.")
     p.add_argument("--no-loudness-match", action="store_true",
                    help="Skip loudness normalisation against the original audio.")
     p.add_argument("--no-mix-background", action="store_true",
@@ -92,6 +94,7 @@ def handler(args: argparse.Namespace) -> None:
         translate_technical_terms=args.translate_technical_terms,
         asr_review=args.asr_review,
         keep_technical_english=args.keep_technical_english,
+        use_youtube_subs=args.youtube_subs,
         subtitle_style=subtitle_style,
         subtitle_source=args.subtitle_source,
         loudness_match=not args.no_loudness_match,

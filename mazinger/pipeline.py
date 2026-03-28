@@ -97,6 +97,7 @@ class MazingerDubber:
         translate_technical_terms: bool = False,
         asr_review: bool = False,
         keep_technical_english: bool = False,
+        use_youtube_subs: bool = False,
         output_type: str = "audio",
         subtitle_style=None,
         subtitle_source: str = "translated",
@@ -185,12 +186,14 @@ class MazingerDubber:
             video_meta = load_json(proj.video_meta)
 
         # -- Download YouTube subtitles (original + target language) ------
-        if _yt_info:
+        if _yt_info and use_youtube_subs:
             download.download_youtube_subtitles(
                 _yt_info,
                 proj.youtube_subs_dir,
                 target_languages=[target_language],
             )
+        elif _yt_info:
+            log.debug("YouTube subtitle download disabled (use_youtube_subs=False)")
 
         # -- Resolve voice (theme / profile / explicit sample+script) -----
         if voice_theme and not (voice_sample and voice_script):
@@ -260,6 +263,12 @@ class MazingerDubber:
         if skip_existing and os.path.exists(proj.source_srt):
             log.info("Skipping transcription (SRT exists)")
         else:
+            # Build an initial prompt from video metadata (title, tags, etc.)
+            # to anchor Whisper's decoder on the expected vocabulary.
+            _initial_prompt = transcribe.build_initial_prompt(video_meta)
+            if _initial_prompt:
+                log.info("Whisper initial prompt (from metadata): %.120s…", _initial_prompt)
+
             transcribe.transcribe(
                 proj.audio, proj.source_srt,
                 method=transcribe_method,
@@ -269,6 +278,7 @@ class MazingerDubber:
                 openai_api_key=self._api_key,
                 openai_base_url=self._base_url,
                 skip_resegment=not use_resegmented,
+                initial_prompt=_initial_prompt,
             )
 
         transcribe.clear_cache()
@@ -276,27 +286,28 @@ class MazingerDubber:
         # 2b. Select best SRT source (ASR vs YouTube) --------------------
         source_srt_for_pipeline = proj.source_srt if use_resegmented else proj.source_raw_srt
 
-        yt_orig_srt = None
-        for fname in os.listdir(proj.youtube_subs_dir) if os.path.isdir(proj.youtube_subs_dir) else []:
-            if fname.endswith("-orig.srt") or fname.endswith("-orig.manual.srt"):
-                yt_orig_srt = os.path.join(proj.youtube_subs_dir, fname)
-                break
+        if use_youtube_subs:
+            yt_orig_srt = None
+            for fname in os.listdir(proj.youtube_subs_dir) if os.path.isdir(proj.youtube_subs_dir) else []:
+                if fname.endswith("-orig.srt") or fname.endswith("-orig.manual.srt"):
+                    yt_orig_srt = os.path.join(proj.youtube_subs_dir, fname)
+                    break
 
-        if yt_orig_srt and os.path.exists(source_srt_for_pipeline):
-            from mazinger.review import select_srt
-            with open(source_srt_for_pipeline, encoding="utf-8") as fh:
-                asr_text = fh.read()
-            with open(yt_orig_srt, encoding="utf-8") as fh:
-                yt_text = fh.read()
-            choice = select_srt(
-                asr_text, yt_text, client,
-                llm_model=self.llm_model,
-                video_meta=video_meta,
-                usage_tracker=usage_tracker,
-            )
-            if choice == "B":
-                source_srt_for_pipeline = yt_orig_srt
-                log.info("Using YouTube SRT as primary source: %s", yt_orig_srt)
+            if yt_orig_srt and os.path.exists(source_srt_for_pipeline):
+                from mazinger.review import select_srt
+                with open(source_srt_for_pipeline, encoding="utf-8") as fh:
+                    asr_text = fh.read()
+                with open(yt_orig_srt, encoding="utf-8") as fh:
+                    yt_text = fh.read()
+                choice = select_srt(
+                    asr_text, yt_text, client,
+                    llm_model=self.llm_model,
+                    video_meta=video_meta,
+                    usage_tracker=usage_tracker,
+                )
+                if choice == "B":
+                    source_srt_for_pipeline = yt_orig_srt
+                    log.info("Using YouTube SRT as primary source: %s", yt_orig_srt)
 
         log.info("Using %s SRT for translation/dubbing: %s",
                  "resegmented" if use_resegmented else "raw",

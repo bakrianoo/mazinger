@@ -22,6 +22,10 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     p.add_argument("--compute-type", default="float16", help="Compute type: float16, int8, int8_float16.")
     p.add_argument("--beam-size", type=int, default=5, help="Beam size for decoding (default: 5).")
     p.add_argument("--language", default=None, help="Force language code (e.g., en, ar).")
+    p.add_argument("--initial-prompt", default=None,
+                   help="Initial text prompt to condition the model (e.g., domain-specific terms).")
+    p.add_argument("--no-condition-on-previous-text", action="store_true",
+                   help="Disable conditioning on previous segment text.")
     p.add_argument("--max-chars", type=int, default=84, help="Max chars per subtitle.")
     p.add_argument("--max-duration", type=float, default=5.0, help="Max seconds per subtitle.")
     p.add_argument("--no-resegment", action="store_true", help="Skip resegmentation.")
@@ -70,6 +74,8 @@ def handler(args: argparse.Namespace) -> None:
         llm_model=args.llm_model,
         openai_api_key=args.openai_api_key,
         openai_base_url=args.openai_base_url,
+        initial_prompt=args.initial_prompt,
+        condition_on_previous_text=not args.no_condition_on_previous_text,
     )
     print(f"SRT saved: {output}")
 

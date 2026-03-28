@@ -43,6 +43,10 @@ Converts the audio track into SRT subtitles. Three backends are available:
 | faster-whisper | Local, CTranslate2 | `transcribe-faster` extra, CUDA GPU |
 | WhisperX | Local, PyTorch + wav2vec2 | `transcribe-whisperx` extra, CUDA GPU |
 
+**Audio preprocessing:** Before transcription, the audio is automatically converted to 16 kHz mono WAV — the native format Whisper was trained on. This avoids lossy-codec artefacts and redundant internal resampling.
+
+**Metadata-driven prompting:** When video metadata is available (e.g. YouTube title, description, tags), the pipeline automatically builds a Whisper `initial_prompt` from it. This anchors the decoder on expected vocabulary and reduces misheard domain-specific terms.
+
 The raw transcription is saved as `source.raw.srt`. A cleaned-up version with basic re-segmentation (merging short fragments, splitting long entries) is saved as `source.srt`.
 
 **Inputs:** `source/audio.mp3`
