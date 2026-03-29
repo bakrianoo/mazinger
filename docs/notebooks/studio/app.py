@@ -309,11 +309,12 @@ with gr.Blocks(theme=theme, title="Mazinger Studio", css=CSS) as app:
                 )
                 with gr.Row():
                     words_per_second = gr.Slider(
-                        1.0, 4.0, value=2.0, step=0.1,
+                        0.0, 4.0, value=0.0, step=0.1,
                         label="Words per second",
+                        info="0 = auto-estimate from source speech rate",
                     )
                     duration_budget = gr.Slider(
-                        0.5, 1.0, value=0.80, step=0.05,
+                        0.5, 1.0, value=0.85, step=0.05,
                         label="Duration budget",
                     )
                 translate_technical = gr.Checkbox(

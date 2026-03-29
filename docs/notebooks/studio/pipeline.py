@@ -360,8 +360,8 @@ def _run_subtitles(
                     source_language=source_language if source_language != "Auto-detect" else "auto",
                     target_language=target_language,
                     translate_technical_terms=translate_technical,
-                    **({"words_per_second": words_per_second} if words_per_second != 2.0 else {}),
-                    **({"duration_budget": duration_budget} if duration_budget != 0.80 else {}),
+                    **({"words_per_second": words_per_second} if words_per_second > 0 else {}),
+                    **({"duration_budget": duration_budget} if duration_budget != 0.85 else {}),
                 )
                 with open(proj.translated_raw_srt, "w", encoding="utf-8") as f:
                     f.write(translated)
@@ -549,9 +549,9 @@ def _run_full_dub(
                 dub_kw["transcribe_method"] = m
             if whisper_model and whisper_model.strip():
                 dub_kw["whisper_model"] = whisper_model.strip()
-            if words_per_second != 2.0:
+            if words_per_second > 0:
                 dub_kw["words_per_second"] = words_per_second
-            if duration_budget != 0.80:
+            if duration_budget != 0.85:
                 dub_kw["duration_budget"] = duration_budget
             paths = dubber.dub(**dub_kw)
             result["paths"] = paths

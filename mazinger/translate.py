@@ -135,11 +135,55 @@ def resolve_source_language(value: str) -> str:
 BLOCKS_PER_BATCH = 24
 OVERLAP_SIZE = 8
 
-# Average English speech rate in words per second (used for duration targeting).
-WORDS_PER_SECOND = 2.0
-# Fraction of duration-based word count to use as the target.  Keeps dubbed
-# audio from overrunning each segment's time window.
-DURATION_BUDGET = 0.80
+# Baseline TTS speech rate by language (words per second).
+# Measured empirically from Qwen3-TTS output at default settings.
+_TTS_WPS: dict[str, float] = {
+    "English": 3.2,
+    "French": 3.4,
+    "German": 3.0,
+    "Spanish": 3.5,
+    "Italian": 3.5,
+    "Portuguese": 3.4,
+    "Russian": 2.8,
+    "Chinese (Simplified)": 3.0,
+    "Chinese (Traditional)": 3.0,
+    "Japanese": 4.0,
+    "Korean": 3.2,
+    "Arabic": 3.0,
+    "Dutch": 3.0,
+}
+_DEFAULT_WPS = 3.0
+
+# Fraction of duration-based word count to use as the target.
+DURATION_BUDGET = 0.85
+# Minimum words per segment — shorter budgets produce unusable fragments.
+MIN_TARGET_WORDS = 4
+
+
+def estimate_wps(
+    blocks: list[tuple[str, float, float, str]],
+    target_language: str = "English",
+) -> float:
+    """Estimate the target words-per-second for duration budgeting.
+
+    Uses the source speech rate (words/time in the source SRT) scaled by the
+    known TTS output rate for the target language.  Falls back to the
+    language-specific TTS baseline when the source is too short or sparse.
+    """
+    tts_wps = _TTS_WPS.get(target_language, _DEFAULT_WPS)
+
+    # Measure source speech density
+    total_words = sum(len(text.split()) for _, _, _, text in blocks)
+    total_dur = sum(end - start for _, start, end, _ in blocks)
+    if total_dur < 1.0 or total_words < 5:
+        return tts_wps
+
+    source_wps = total_words / total_dur
+
+    # The source speaker may be much faster than TTS can reproduce.
+    # Cap at the TTS baseline — requesting more words than TTS can speak
+    # just causes overflow and truncation.
+    return min(source_wps, tts_wps)
 
 
 def _build_system_prompt(
@@ -147,7 +191,7 @@ def _build_system_prompt(
     keypoints: list[str],
     target_language: str = "English",
     source_language: str = "auto",
-    words_per_second: float = WORDS_PER_SECOND,
+    words_per_second: float = _DEFAULT_WPS,
     duration_budget: float = DURATION_BUDGET,
     translate_technical_terms: bool = False,
 ) -> str:
@@ -156,6 +200,7 @@ def _build_system_prompt(
     budget_pct = int(duration_budget * 100)
     example_dur = 20.0
     example_target = int(example_dur * words_per_second * duration_budget)
+    over_example = example_target + 5
 
     if source_language == "auto":
         source_ctx = (
@@ -189,23 +234,19 @@ QUALITY GOALS:
   repetition.
 
 DURATION MATCHING (CRITICAL FOR DUBBING):
-- Each entry has a "target_words" field — the maximum number of words for \
-  your translation.
-- The target word count is already set to ~{budget_pct}% of the available time window \
-  (at ~{words_per_second} {target_language} words/second). This {budget_pct}% budget ensures the generated \
-  dubbed voice finishes naturally BEFORE the next segment starts, leaving \
-  a small breathing room.
-- Your translation for each entry MUST stay WITHIN the target word count. \
-  Do NOT exceed it -- going over causes the dubbed audio to be cut off \
-  mid-sentence.
-- Example: a "target_words": {example_target} entry needs around {example_target} words.
-- Aim for 90-100% of the target word count. Significantly fewer words \
-  create awkward silences; more words cause cut-off speech.
-- If the original content is too dense for the word budget, prioritise the \
-  core meaning and drop minor asides -- but never compress to less than \
-  ~70% of the target.
-- Do NOT pad with meaningless filler. Every word should contribute to a \
-  natural, fluent delivery.
+- Each entry has a "target_words" field — the HARD MAXIMUM number of words \
+  for your translation. Exceeding it causes the dubbed audio to be CUT OFF \
+  mid-sentence, ruining the viewer experience.
+- The target word count equals ~{budget_pct}% of the available time window \
+  (at ~{words_per_second:.1f} {target_language} words/second).
+- ALWAYS count your output words and ensure they are ≤ target_words. \
+  For example, if "target_words": {example_target}, write exactly \
+  {example_target} words or fewer — never {over_example}.
+- Aim for 85-100% of the target. Fewer words = awkward silence; \
+  more words = speech cut off.
+- If the original content is too dense for the word budget, PRIORITISE \
+  the core meaning and drop minor asides or redundant phrases. \
+  Never pad with filler.
 
 STRUCTURAL RULES:
 1. Translate EVERY entry in the MAIN BLOCK. Do NOT skip, merge, split, or \
@@ -253,14 +294,14 @@ def _technical_terms_instruction(
 
 def _blocks_to_json_entries(
     blocks: list[tuple[str, float, float, str]],
-    words_per_second: float = WORDS_PER_SECOND,
+    words_per_second: float = _DEFAULT_WPS,
     duration_budget: float = DURATION_BUDGET,
 ) -> str:
     """Convert blocks to a JSON array of {index, text, target_words} for LLM input."""
     entries = []
     for idx, start, end, text in blocks:
         dur = end - start
-        target_words = max(1, round(dur * words_per_second * duration_budget))
+        target_words = max(MIN_TARGET_WORDS, round(dur * words_per_second * duration_budget))
         entries.append({
             "index": idx,
             "text": text,
@@ -418,6 +459,26 @@ def _parse_translation_response(
     return list(core_blocks)
 
 
+def _validate_word_counts(
+    translated_blocks: list[tuple[str, float, float, str]],
+    words_per_second: float,
+    duration_budget: float,
+    tolerance: float = 1.5,
+) -> list[tuple[str, float, float, str, int, int]]:
+    """Return blocks that exceed their word budget by more than *tolerance*.
+
+    Each returned tuple appends ``(actual_words, target_words)`` to the block.
+    """
+    violations = []
+    for idx, start, end, text in translated_blocks:
+        dur = end - start
+        target = max(MIN_TARGET_WORDS, round(dur * words_per_second * duration_budget))
+        actual = len(text.split())
+        if actual > target * tolerance:
+            violations.append((idx, start, end, text, actual, target))
+    return violations
+
+
 def translate_srt(
     srt_text: str,
     description: dict,
@@ -429,7 +490,7 @@ def translate_srt(
     target_language: str = "English",
     blocks_per_batch: int = BLOCKS_PER_BATCH,
     overlap_size: int = OVERLAP_SIZE,
-    words_per_second: float = WORDS_PER_SECOND,
+    words_per_second: float | None = None,
     duration_budget: float = DURATION_BUDGET,
     translate_technical_terms: bool = False,
     video_meta: dict | None = None,
@@ -447,6 +508,9 @@ def translate_srt(
         target_language:  Target language for translation (default: ``English``).
         blocks_per_batch: Number of core SRT blocks per LLM call.
         overlap_size:     Number of context blocks before/after each batch.
+        words_per_second: Target speech rate.  When ``None`` (default), estimated
+                          automatically from the source speech density and the
+                          target language TTS rate.
         translate_technical_terms: When ``True`` translate technical terms
                           into professional target-language equivalents;
                           when ``False`` (default) keep them in the original
@@ -458,6 +522,12 @@ def translate_srt(
     source_language = resolve_source_language(source_language)
     target_language = resolve_language(target_language)
 
+    all_blocks = parse_blocks(srt_text)
+
+    if words_per_second is None:
+        words_per_second = estimate_wps(all_blocks, target_language)
+    log.info("Translation WPS: %.2f (budget: %.0f%%)", words_per_second, duration_budget * 100)
+
     keywords = description.get("keywords", [])
     keypoints = description.get("keypoints", [])
     system_prompt = _build_system_prompt(
@@ -468,7 +538,6 @@ def translate_srt(
         translate_technical_terms=translate_technical_terms,
     )
 
-    all_blocks = parse_blocks(srt_text)
     log.info("Translating %d SRT blocks in batches of %d", len(all_blocks), blocks_per_batch)
 
     batch_ranges = []
@@ -527,6 +596,23 @@ def translate_srt(
         raw_content = resp.choices[0].message.content.strip()
         batch_translated = _parse_translation_response(raw_content, core_blocks)
         translated_blocks.extend(batch_translated)
+
+    # Validation report (assembly handles overflow via tempo stretch)
+    violations = _validate_word_counts(
+        translated_blocks, words_per_second, duration_budget,
+    )
+    if violations:
+        over_total = sum(a - t for _, _, _, _, a, t in violations)
+        log.warning(
+            "%d/%d segments over word budget (excess: %d words). "
+            "Assembly will compensate via tempo stretch. "
+            "Segments: %s",
+            len(violations), len(translated_blocks), over_total,
+            ", ".join(
+                "{}({}w/{}w)".format(idx, actual, target)
+                for idx, _, _, _, actual, target in violations[:10]
+            ),
+        )
 
     result = blocks_to_text(translated_blocks)
 

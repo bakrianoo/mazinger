@@ -57,9 +57,9 @@ proj = dubber.dub(
     use_resegmented=False,            # bool — use resegmented SRT for TTS input
     tempo_mode="auto",                # str — "auto", "dynamic", "fixed", "off"
     fixed_tempo=None,                 # float — constant speed multiplier
-    max_tempo=1.3,                    # float — speed-up cap for auto/dynamic
-    words_per_second=None,            # float — speech rate for word budgets (default: 2.0)
-    duration_budget=None,             # float — fraction of time for speech (default: 0.80)
+    max_tempo=1.5,                    # float — speed-up cap for auto/dynamic
+    words_per_second=None,            # float — speech rate for word budgets (auto-estimated)
+    duration_budget=None,             # float — fraction of time for speech (default: 0.85)
     translate_technical_terms=False,   # bool — translate tech terms vs. keep in English
     asr_review=False,                  # bool — review ASR transcript (fix typos, punctuation)
     keep_technical_english=False,      # bool — convert technical terms to English (requires asr_review)
@@ -296,8 +296,6 @@ translated = translate_srt(
     thumb_paths=thumbs,
     client=client,
     target_language="Spanish",
-    words_per_second=2.0,
-    duration_budget=0.80,
 )
 
 with open("translated.srt", "w") as f:
@@ -318,8 +316,8 @@ translate_srt(
     target_language="English",
     blocks_per_batch=24,
     overlap_size=8,
-    words_per_second=2.0,
-    duration_budget=0.80,
+    words_per_second=None,       # auto-estimated from source + target language
+    duration_budget=0.85,
     translate_technical_terms=False,
     usage_tracker=None,    # LLMUsageTracker
 )
