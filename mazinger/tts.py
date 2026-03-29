@@ -406,30 +406,27 @@ def synthesize_segments(
 
         segment_info.append(rec)
 
-    # Synthesize all pending segments (batch when the engine supports it)
+    # Synthesize pending segments one-by-one, saving each WAV immediately
+    # so that already-produced files survive a crash and are cached on retry.
     if pending:
         log.info("TTS: %d segments to synthesize (%d cached)",
                  len(pending), len(srt_entries) - len(pending))
         use_wrapper = isinstance(voice_prompt, TTSWrapper)
-        items = [(text, language) for _, text, _ in pending]
+        total = len(pending)
 
-        if use_wrapper:
-            results = voice_prompt.synthesize_batch(items)
-        else:
-            # Legacy Qwen API (backward compatibility)
-            total = len(items)
-            results = []
-            for i, (text, lang) in enumerate(items, 1):
-                log.info("Synthesising segment %d/%d", i, total)
+        for i, (seg_idx, text, wav_path) in enumerate(pending, 1):
+            log.info("Synthesising segment %d/%d", i, total)
+            if use_wrapper:
+                audio_data, sr = voice_prompt.synthesize(text, language)
+            else:
+                # Legacy Qwen API (backward compatibility)
                 wavs, sr = model.generate_voice_clone(
-                    text=text, language=lang, voice_clone_prompt=voice_prompt,
+                    text=text, language=language, voice_clone_prompt=voice_prompt,
                 )
-                results.append((wavs[0], sr))
+                audio_data = wavs[0]
 
-        for (seg_idx, _, wav_path), (audio_data, sr) in zip(pending, results):
-            actual_dur = len(audio_data) / sr
             sf.write(wav_path, audio_data, sr)
-            segment_info[seg_idx]["actual_dur"] = actual_dur
+            segment_info[seg_idx]["actual_dur"] = len(audio_data) / sr
 
     produced = sum(1 for s in segment_info if s["wav_path"])
     skipped = sum(1 for s in segment_info if s.get("_skipped"))

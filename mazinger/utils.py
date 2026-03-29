@@ -11,6 +11,9 @@ import subprocess
 
 log = logging.getLogger(__name__)
 
+# Minimum file size (bytes) to consider a media file non-truncated.
+_MIN_MEDIA_BYTES = 1024
+
 
 # ---------------------------------------------------------------------------
 #  Filename helpers
@@ -84,6 +87,63 @@ def get_audio_duration(path: str) -> float:
         capture_output=True, text=True, check=True,
     )
     return float(json.loads(result.stdout)["format"]["duration"])
+
+
+# ---------------------------------------------------------------------------
+#  Cache-validity helpers
+# ---------------------------------------------------------------------------
+
+def is_valid_media_file(path: str) -> bool:
+    """Return True if *path* exists and is larger than the minimum threshold."""
+    try:
+        return os.path.isfile(path) and os.path.getsize(path) >= _MIN_MEDIA_BYTES
+    except OSError:
+        return False
+
+
+def is_valid_srt_file(path: str) -> bool:
+    """Return True if *path* is a readable SRT with at least one subtitle entry."""
+    try:
+        if not os.path.isfile(path) or os.path.getsize(path) == 0:
+            return False
+        with open(path, encoding="utf-8") as fh:
+            content = fh.read()
+        # An SRT must contain at least one timestamp arrow.
+        return bool(re.search(r"\d{2}:\d{2}:\d{2},\d{3}\s*-->\s*\d{2}:\d{2}:\d{2},\d{3}", content))
+    except (OSError, UnicodeDecodeError):
+        return False
+
+
+def is_valid_json_file(path: str, required_keys: tuple[str, ...] = ()) -> bool:
+    """Return True if *path* is parseable JSON, optionally with *required_keys*."""
+    try:
+        if not os.path.isfile(path) or os.path.getsize(path) == 0:
+            return False
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        if required_keys and isinstance(data, dict):
+            return all(k in data for k in required_keys)
+        return True
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        return False
+
+
+def is_valid_thumbs_meta(path: str) -> bool:
+    """Return True if *path* is a JSON list with at least one thumbnail entry."""
+    try:
+        if not os.path.isfile(path) or os.path.getsize(path) == 0:
+            return False
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        if not isinstance(data, list) or len(data) == 0:
+            return False
+        # Each entry must reference an image file that actually exists.
+        return any(
+            isinstance(e, dict) and os.path.isfile(e.get("path", ""))
+            for e in data
+        )
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        return False
 
 
 # ---------------------------------------------------------------------------

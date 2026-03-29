@@ -7,7 +7,11 @@ import os
 from typing import Any
 
 from mazinger.paths import ProjectPaths
-from mazinger.utils import save_json, load_json, get_audio_duration, LLMUsageTracker
+from mazinger.utils import (
+    save_json, load_json, get_audio_duration, LLMUsageTracker,
+    is_valid_media_file, is_valid_srt_file, is_valid_json_file,
+    is_valid_thumbs_meta,
+)
 
 log = logging.getLogger(__name__)
 
@@ -236,11 +240,11 @@ class MazingerDubber:
 
         if is_local_audio:
             # Local audio file — copy into project, no video to process.
-            if not (skip_existing and os.path.exists(proj.audio)):
+            if not (skip_existing and is_valid_media_file(proj.audio)):
                 download.ingest_local_audio(source, proj.audio)
         elif is_remote:
             # URL — download video then extract audio.
-            if skip_existing and os.path.exists(proj.video):
+            if skip_existing and is_valid_media_file(proj.video):
                 log.info("Skipping download (video exists)")
             else:
                 download.download_video(
@@ -253,7 +257,7 @@ class MazingerDubber:
             download.extract_audio(proj.video, proj.audio)
         else:
             # Local video file — copy into project and extract audio.
-            if not (skip_existing and os.path.exists(proj.video)):
+            if not (skip_existing and is_valid_media_file(proj.video)):
                 download.ingest_local_video(source, proj.video, proj.audio)
             else:
                 download.extract_audio(proj.video, proj.audio)
@@ -263,7 +267,7 @@ class MazingerDubber:
             download.slice_project(proj, start=start, end=end)
 
         # 2. Transcribe --------------------------------------------------
-        if skip_existing and os.path.exists(proj.source_srt):
+        if skip_existing and is_valid_srt_file(proj.source_srt):
             log.info("Skipping transcription (SRT exists)")
         else:
             # Build an initial prompt from video metadata (title, tags, etc.)
@@ -324,7 +328,7 @@ class MazingerDubber:
         if not has_video:
             log.info("No video available — skipping thumbnail extraction")
             thumb_paths = []
-        elif skip_existing and os.path.exists(proj.thumbs_meta):
+        elif skip_existing and is_valid_thumbs_meta(proj.thumbs_meta):
             log.info("Skipping thumbnails (metadata exists)")
             thumb_paths = load_json(proj.thumbs_meta)
         else:
@@ -338,7 +342,7 @@ class MazingerDubber:
             save_json(thumb_paths, proj.thumbs_meta)
 
         # 4. Describe content --------------------------------------------
-        if skip_existing and os.path.exists(proj.description):
+        if skip_existing and is_valid_json_file(proj.description, required_keys=("title", "summary")):
             log.info("Skipping description (file exists)")
             description = load_json(proj.description)
         elif not has_video:
@@ -355,7 +359,7 @@ class MazingerDubber:
 
         # 4b. ASR review (optional) --------------------------------------
         if asr_review:
-            if skip_existing and os.path.exists(proj.reviewed_srt):
+            if skip_existing and is_valid_srt_file(proj.reviewed_srt):
                 log.info("Skipping ASR review (file exists)")
                 with open(proj.reviewed_srt, encoding="utf-8") as fh:
                     source_srt_text = fh.read()
@@ -377,7 +381,7 @@ class MazingerDubber:
             from mazinger.profiles import create_auto_clone_profile
             profile_dir = proj.voice_profile_dir
             profile_wav = os.path.join(profile_dir, "voice.wav")
-            if skip_existing and os.path.isfile(profile_wav):
+            if skip_existing and is_valid_media_file(profile_wav):
                 log.info("Reusing auto-cloned voice profile: %s", profile_dir)
                 voice_sample = profile_wav
             else:
@@ -391,7 +395,7 @@ class MazingerDubber:
                 )
 
         # 5. Translate ---------------------------------------------------
-        if skip_existing and os.path.exists(proj.translated_raw_srt):
+        if skip_existing and is_valid_srt_file(proj.translated_raw_srt):
             log.info("Skipping translation (file exists)")
             with open(proj.translated_raw_srt, encoding="utf-8") as fh:
                 translated_srt = fh.read()
@@ -419,7 +423,7 @@ class MazingerDubber:
             effective_mode = "long" if median_dur < 3.0 else "short"
             log.info("Auto segment mode: median=%.1fs -> %s", median_dur, effective_mode)
 
-        if skip_existing and os.path.exists(proj.final_srt):
+        if skip_existing and is_valid_srt_file(proj.final_srt):
             log.info("Skipping re-segmentation (file exists)")
         elif effective_mode == "long":
             resegmented = resegment.merge_long_segments(
