@@ -752,11 +752,16 @@ def _transcribe_deepgram(
         request=buffer_data, **options_kw,
     )
 
-    # Extract detected language
+    # Extract detected language and confidence
     detected_lang = "unknown"
     channels = response.results.channels
     if channels:
         detected_lang = getattr(channels[0], "detected_language", None) or "unknown"
+        lang_confidence = getattr(channels[0], "language_confidence", None)
+        if lang_confidence is not None:
+            log.info("Detected language: %s (confidence: %.2f)", detected_lang, lang_confidence)
+        else:
+            log.info("Detected language: %s", detected_lang)
 
     # Build segments from utterances (natural speech boundaries)
     raw_segments: list[dict] = []
