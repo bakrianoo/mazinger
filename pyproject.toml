@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mazinger"
-version = "1.8.9"
+version = "1.9.0"
 description = "End-to-end video dubbing pipeline: transcribe, translate, and voice-clone."
 readme = "README.md"
 license = {text = "MIT"}
