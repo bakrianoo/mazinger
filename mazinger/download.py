@@ -8,7 +8,7 @@ import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 import yt_dlp
 
@@ -88,6 +88,27 @@ def is_url(source: str) -> bool:
     """Return ``True`` if *source* looks like a URL rather than a local path."""
     parsed = urlparse(source)
     return parsed.scheme in ("http", "https", "ftp", "ftps")
+
+
+def _strip_playlist_params(url: str) -> str:
+    """Remove playlist-related query parameters from a YouTube URL.
+
+    yt-dlp's ``noplaylist`` option is not always sufficient — some playlist
+    parameters can still cause it to resolve the playlist instead of the
+    single video.  Stripping ``list``, ``index``, and ``start_radio`` from
+    the query string ensures only the target video is downloaded.
+
+    Non-YouTube URLs are returned unchanged.
+    """
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    if not any(h in host for h in ("youtube.com", "youtu.be", "youtube-nocookie.com")):
+        return url
+    qs = parse_qs(parsed.query, keep_blank_values=True)
+    _PLAYLIST_KEYS = {"list", "index", "start_radio"}
+    stripped = {k: v for k, v in qs.items() if k not in _PLAYLIST_KEYS}
+    new_query = urlencode(stripped, doseq=True)
+    return urlunparse(parsed._replace(query=new_query))
 
 
 def is_audio_file(path: str) -> bool:
@@ -176,6 +197,7 @@ def resolve_slug(
         A ``(slug, info_dict)`` tuple where *info_dict* is the full metadata
         dictionary returned by yt-dlp.
     """
+    url = _strip_playlist_params(url)
     opts = {
         "skip_download": True,
         "quiet": True,
@@ -410,6 +432,7 @@ def download_video(
         quality or "medium", max_height, fmt,
     )
 
+    url = _strip_playlist_params(url)
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
     opts = {
         "format": fmt,
