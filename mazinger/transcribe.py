@@ -1,6 +1,6 @@
-"""Transcribe audio to SRT using OpenAI Whisper API, faster-whisper, or WhisperX.
+"""Transcribe audio to SRT using OpenAI Whisper API, faster-whisper, WhisperX, or Deepgram.
 
-Supports three transcription backends:
+Supports four transcription backends:
 - **openai** (default): Uses OpenAI's Whisper API. No local GPU required,
   simple setup, works with any transformers version. Requires OPENAI_API_KEY.
 - **faster-whisper**: Fast local transcription using CTranslate2. 4x faster
@@ -9,6 +9,9 @@ Supports three transcription backends:
 - **whisperx**: Local transcription with word-level alignment via wav2vec2.
   Requires PyTorch + CUDA and the [transcribe-whisperx] extra. Not compatible
   with chatterbox-tts due to conflicting transformers requirements.
+- **deepgram**: Uses Deepgram's Nova API for fast, accurate cloud
+  transcription with word-level timestamps. Supports 47+ languages.
+  Requires DEEPGRAM_API_KEY. Requires [transcribe-deepgram] extra.
 """
 
 from __future__ import annotations
@@ -22,7 +25,7 @@ from typing import Any, Literal
 log = logging.getLogger(__name__)
 
 # Supported transcription methods
-TranscribeMethod = Literal["openai", "faster-whisper", "whisperx"]
+TranscribeMethod = Literal["openai", "faster-whisper", "whisperx", "deepgram"]
 
 # Module-level cache for faster-whisper models — avoids reloading across runs
 _whisper_cache: dict[str, Any] = {}
@@ -694,6 +697,114 @@ def _transcribe_whisperx(
     return raw_segments, detected_lang
 
 
+# ── Deepgram Nova API backend ───────────────────────────────────────────────
+
+def _transcribe_deepgram(
+    audio_path: str,
+    *,
+    model: str = "nova-3",
+    language: str | None = None,
+    api_key: str | None = None,
+    keyterms: list[str] | None = None,
+) -> tuple[list[dict], str]:
+    """Transcribe using Deepgram's Nova STT API.
+
+    Deepgram Nova-3 is a fast, accurate cloud transcription service
+    supporting 47+ languages with word-level timestamps.
+
+    Requires: pip install "mazinger[transcribe-deepgram]"
+
+    Returns:
+        A tuple of (segments, detected_language).
+        Each segment has 'start', 'end', 'text', and 'words' keys.
+    """
+    try:
+        from deepgram import DeepgramClient
+    except ImportError as e:
+        raise ImportError(
+            "deepgram-sdk not installed. Install with: pip install 'mazinger[transcribe-deepgram]'\n"
+            "Or use method='openai' for cloud-based transcription."
+        ) from e
+
+    client = DeepgramClient(api_key=api_key) if api_key else DeepgramClient()
+
+    with open(audio_path, "rb") as f:
+        buffer_data = f.read()
+
+    options_kw: dict[str, Any] = {
+        "model": model,
+        "smart_format": True,
+        "punctuate": True,
+        "utterances": True,
+    }
+    if language:
+        options_kw["language"] = language
+    else:
+        options_kw["detect_language"] = True
+
+    # Nova-3 keyterm boosting: improve recognition of domain-specific terms
+    # extracted from video metadata (title, tags, description).
+    if keyterms and "nova-3" in model:
+        options_kw["keyterm"] = keyterms[:100]
+
+    log.info("Calling Deepgram API (model=%s)...", model)
+    response = client.listen.v1.media.transcribe_file(
+        request=buffer_data, **options_kw,
+    )
+
+    # Extract detected language
+    detected_lang = "unknown"
+    channels = response.results.channels
+    if channels:
+        detected_lang = getattr(channels[0], "detected_language", None) or "unknown"
+
+    # Build segments from utterances (natural speech boundaries)
+    raw_segments: list[dict] = []
+    utterances = getattr(response.results, "utterances", None)
+    if utterances:
+        for utt in utterances:
+            segment: dict[str, Any] = {
+                "start": utt.start,
+                "end": utt.end,
+                "text": utt.transcript.strip(),
+            }
+            if utt.words:
+                segment["words"] = [
+                    {
+                        "word": getattr(w, "punctuated_word", None) or w.word,
+                        "start": w.start,
+                        "end": w.end,
+                    }
+                    for w in utt.words
+                ]
+            raw_segments.append(segment)
+    elif channels:
+        # Fallback: build a single segment from the full transcript
+        alt = channels[0].alternatives[0]
+        if alt.transcript.strip():
+            segment = {
+                "start": alt.words[0].start if alt.words else 0.0,
+                "end": alt.words[-1].end if alt.words else 0.0,
+                "text": alt.transcript.strip(),
+            }
+            if alt.words:
+                segment["words"] = [
+                    {
+                        "word": getattr(w, "punctuated_word", None) or w.word,
+                        "start": w.start,
+                        "end": w.end,
+                    }
+                    for w in alt.words
+                ]
+            raw_segments.append(segment)
+
+    log.info(
+        "Deepgram transcription complete: %d segments, language=%s",
+        len(raw_segments), detected_lang,
+    )
+    return raw_segments, detected_lang
+
+
 # ── LLM-based text refinement ────────────────────────────────────────────────
 
 def _refine_segments_llm(
@@ -779,19 +890,21 @@ def transcribe(
     llm_model: str = "gpt-4.1",
     openai_api_key: str | None = None,
     openai_base_url: str | None = None,
+    deepgram_api_key: str | None = None,
     initial_prompt: str | None = None,
     condition_on_previous_text: bool = True,
     vad_options: dict | None = None,
 ) -> str:
-    """Transcribe audio to SRT using OpenAI Whisper API, faster-whisper, or WhisperX.
+    """Transcribe audio to SRT using OpenAI Whisper, faster-whisper, WhisperX, or Deepgram.
 
     Parameters:
         audio_path:     Path to the input audio file.
         output_path:    Where to save the final SRT.
         method:         Transcription backend: ``whisperx`` (default),
-                        ``openai``, or ``faster-whisper``.
+                        ``openai``, ``faster-whisper``, or ``deepgram``.
         model:          Model name. Defaults to ``whisper-1`` for OpenAI,
-                        ``large-v3`` for faster-whisper and WhisperX.
+                        ``large-v3`` for faster-whisper/WhisperX,
+                        ``nova-3`` for Deepgram.
         device:         ``cuda`` or ``cpu`` (local methods only).
         batch_size:     Inference batch size (local methods only).
         compute_type:   ``float16``, ``int8``, or ``int8_float16`` (local methods).
@@ -802,6 +915,8 @@ def transcribe(
         skip_resegment: When ``True``, keep original segments as-is.
         openai_api_key: OpenAI API key (OpenAI method only). Falls back to
                         ``OPENAI_API_KEY`` environment variable.
+        deepgram_api_key: Deepgram API key (Deepgram method only). Falls back
+                        to ``DEEPGRAM_API_KEY`` environment variable.
 
     Returns:
         The path to the saved SRT file.
@@ -818,6 +933,9 @@ def transcribe(
 
         # Using WhisperX (requires [transcribe-whisperx] extra)
         transcribe("audio.mp3", "output.srt", method="whisperx", device="cuda")
+
+        # Using Deepgram Nova-3 (cloud, fast and accurate)
+        transcribe("audio.mp3", "output.srt", method="deepgram")
     """
     if not os.path.exists(audio_path):
         raise FileNotFoundError(f"Audio file not found: {audio_path}")
@@ -858,8 +976,27 @@ def transcribe(
             compute_type=compute_type,
             language=language,
         )
+    elif method == "deepgram":
+        default_model = "nova-3"
+        # Extract keyterms from initial_prompt for Nova-3 term boosting
+        keyterms = None
+        if initial_prompt:
+            # Split on common delimiters to extract individual terms
+            keyterms = [
+                t.strip() for t in re.split(r"[.,;|]+", initial_prompt) if t.strip()
+            ]
+        raw_segments, detected_lang = _transcribe_deepgram(
+            audio_path,
+            model=model or default_model,
+            language=language,
+            api_key=deepgram_api_key,
+            keyterms=keyterms,
+        )
     else:
-        raise ValueError(f"Unknown transcription method: {method!r}. Use 'openai', 'faster-whisper', or 'whisperx'.")
+        raise ValueError(
+            f"Unknown transcription method: {method!r}. "
+            "Use 'openai', 'faster-whisper', 'whisperx', or 'deepgram'."
+        )
 
     log.info("Transcription complete: %d segments, language=%s", len(raw_segments), detected_lang)
 

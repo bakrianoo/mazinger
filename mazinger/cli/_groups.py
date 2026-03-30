@@ -116,6 +116,7 @@ def ensure_transcription(proj, args: argparse.Namespace) -> None:
         device=getattr(args, "device", "cuda"),
         openai_api_key=getattr(args, "openai_api_key", None),
         openai_base_url=getattr(args, "openai_base_url", None),
+        deepgram_api_key=getattr(args, "deepgram_api_key", None),
     )
 
 
@@ -146,6 +147,10 @@ def add_common(p: argparse.ArgumentParser) -> None:
 def add_openai(p: argparse.ArgumentParser) -> None:
     p.add_argument("--openai-api-key", default=os.environ.get("OPENAI_API_KEY"), help="OpenAI API key.")
     p.add_argument("--openai-base-url", default=os.environ.get("OPENAI_BASE_URL"), help="Base URL for OpenAI-compatible API.")
+
+
+def add_deepgram(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--deepgram-api-key", default=os.environ.get("DEEPGRAM_API_KEY"), help="Deepgram API key.")
 
 
 def add_llm(p: argparse.ArgumentParser) -> None:
@@ -216,11 +221,13 @@ def add_segment_mode(p: argparse.ArgumentParser) -> None:
 
 def add_transcription(p: argparse.ArgumentParser) -> None:
     p.add_argument(
-        "--transcribe-method", default="whisperx", choices=["openai", "faster-whisper", "whisperx"],
-        help="Transcription backend: 'openai', 'faster-whisper', or 'whisperx'.",
+        "--transcribe-method", default="whisperx",
+        choices=["openai", "faster-whisper", "whisperx", "deepgram"],
+        help="Transcription backend: 'openai', 'faster-whisper', 'whisperx', or 'deepgram'.",
     )
-    p.add_argument("--whisper-model", default=None, help="Whisper model name.")
+    p.add_argument("--whisper-model", default=None, help="Whisper/Deepgram model name.")
     p.add_argument("--beam-size", type=int, default=5, help="Beam size for decoding (default: 5).")
+    add_deepgram(p)
 
 
 def add_cookies(p: argparse.ArgumentParser) -> None:

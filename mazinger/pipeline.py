@@ -79,6 +79,7 @@ class MazingerDubber:
         tts_engine: str = "qwen",
         source_language: str = "auto",
         target_language: str = "English",
+        deepgram_api_key: str | None = None,
         chatterbox_model: str = "ResembleAI/chatterbox",
         chatterbox_exaggeration: float = 0.5,
         chatterbox_cfg: float = 0.5,
@@ -284,6 +285,7 @@ class MazingerDubber:
                 beam_size=beam_size,
                 openai_api_key=self._api_key,
                 openai_base_url=self._base_url,
+                deepgram_api_key=deepgram_api_key,
                 skip_resegment=not use_resegmented,
                 initial_prompt=_initial_prompt,
             )
