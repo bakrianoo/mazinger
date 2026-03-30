@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mazinger"
-version = "1.9.0"
+version = "1.9.1"
 description = "End-to-end video dubbing pipeline: transcribe, translate, and voice-clone."
 readme = "README.md"
 license = {text = "MIT"}
@@ -33,6 +33,8 @@ transcribe-faster = [
 transcribe-whisperx = [
     "whisperx>=3.0",
     "torch>=2.0",
+    "scipy>=1.14",          # ABI-compatible with numpy 2.x (Colab Fix)
+    "scikit-learn>=1.5",    # Pulled by transformers; must match scipy
 ]
 # Alias for backwards compatibility (points to whisperx)
 transcribe = [
