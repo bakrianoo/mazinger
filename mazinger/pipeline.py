@@ -87,7 +87,7 @@ class MazingerDubber:
         chatterbox_model: str = "ResembleAI/chatterbox",
         chatterbox_exaggeration: float = 0.5,
         chatterbox_cfg: float = 0.5,
-        mlx_model: str = "mlx-community/Qwen3-TTS-12Hz-0.6B-Base-bf16",
+        mlx_model: str = "mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-bf16",
         loudness_match: bool = True,
         mix_background: bool = True,
         background_volume: float = 0.15,
