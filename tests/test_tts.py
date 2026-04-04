@@ -4,6 +4,33 @@ import numpy as np
 import pytest
 
 
+class TestMLXTranscribe:
+    def test_transcribe_method_includes_mlx_whisper(self):
+        from mazinger.transcribe import TranscribeMethod
+
+        # Verify mlx-whisper is a valid literal
+        import typing
+
+        origin = typing.get_origin(TranscribeMethod)
+        if origin is not None:
+            args = typing.get_args(TranscribeMethod)
+        else:
+            args = TranscribeMethod.__args__
+        assert "mlx-whisper" in args
+
+    def test_transcribe_rejects_unknown_method(self):
+        from mazinger.transcribe import transcribe
+        import tempfile, os
+
+        tmp = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
+        tmp.close()
+        try:
+            with pytest.raises(ValueError, match="Unknown transcription method"):
+                transcribe(tmp.name, "out.srt", method="invalid")
+        finally:
+            os.unlink(tmp.name)
+
+
 class TestMLXTTSWrapper:
     def test_mlx_wrapper_exists(self):
         from mazinger.tts import _MLXTTSWrapper

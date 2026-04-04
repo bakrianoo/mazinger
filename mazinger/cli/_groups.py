@@ -316,8 +316,8 @@ def add_transcription(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--transcribe-method",
         default="faster-whisper",
-        choices=["openai", "faster-whisper", "whisperx"],
-        help="Transcription backend: 'faster-whisper' (default), 'openai', or 'whisperx'.",
+        choices=["openai", "faster-whisper", "whisperx", "mlx-whisper"],
+        help="Transcription backend: 'faster-whisper' (default), 'openai', 'whisperx', or 'mlx-whisper' (Apple Silicon).",
     )
     p.add_argument("--whisper-model", default=None, help="Whisper model name.")
     p.add_argument(

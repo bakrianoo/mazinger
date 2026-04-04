@@ -81,9 +81,13 @@ tts-mlx = [
     "mlx>=0.20",
     "soundfile>=0.12",
 ]
+# MLX Whisper for Apple Silicon transcription (GPU-accelerated)
+transcribe-mlx = [
+    "mlx-whisper>=0.4",
+]
 # Full pipeline with MLX Qwen3-TTS — Apple Silicon optimized
 all-mlx = [
-    "mazinger[transcribe-faster,tts-mlx,audio-enhance]",
+    "mazinger[transcribe-mlx,tts-mlx,audio-enhance]",
 ]
 
 [project.scripts]

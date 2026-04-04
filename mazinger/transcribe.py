@@ -1,6 +1,6 @@
-"""Transcribe audio to SRT using OpenAI Whisper API, faster-whisper, or WhisperX.
+"""Transcribe audio to SRT using OpenAI Whisper API, faster-whisper, WhisperX, or MLX Whisper.
 
-Supports three transcription backends:
+Supports four transcription backends:
 - **openai** (default): Uses OpenAI's Whisper API. No local GPU required,
   simple setup, works with any transformers version. Requires OPENAI_API_KEY.
 - **faster-whisper**: Fast local transcription using CTranslate2. 4x faster
@@ -9,6 +9,8 @@ Supports three transcription backends:
 - **whisperx**: Local transcription with word-level alignment via wav2vec2.
   Requires PyTorch + CUDA and the [transcribe-whisperx] extra. Not compatible
   with chatterbox-tts due to conflicting transformers requirements.
+- **mlx-whisper**: Apple Silicon GPU-accelerated transcription via MLX.
+  10-20x faster than CPU-based faster-whisper. Requires [transcribe-mlx] extra.
 """
 
 from __future__ import annotations
@@ -22,7 +24,7 @@ from typing import Any, Literal
 log = logging.getLogger(__name__)
 
 # Supported transcription methods
-TranscribeMethod = Literal["openai", "faster-whisper", "whisperx"]
+TranscribeMethod = Literal["openai", "faster-whisper", "whisperx", "mlx-whisper"]
 
 # Module-level cache for faster-whisper models — avoids reloading across runs
 _whisper_cache: dict[str, Any] = {}
@@ -82,6 +84,7 @@ def clear_cache() -> None:
 
 
 # ── SRT formatting (self-contained so this module has no intra-package deps) ──
+
 
 def _fmt_srt_time(s: float) -> str:
     h = int(s // 3600)
@@ -148,6 +151,7 @@ def _clean_segments(segments: list[dict]) -> list[dict]:
 
 # ── Resegmentation helpers ────────────────────────────────────────────────────
 
+
 def _split_by_words(
     words: list[dict],
     max_chars: int,
@@ -165,7 +169,7 @@ def _split_by_words(
     """
     chunks: list[dict] = []
 
-    buf_words: list[dict] = []      # words accumulated in current chunk
+    buf_words: list[dict] = []  # words accumulated in current chunk
     buf_text = ""
     buf_start: float | None = None
 
@@ -229,7 +233,9 @@ def _split_by_words(
                 # Flush up to the best pause point we found
                 _flush(up_to=best_idx + 1)
                 # Re-evaluate: add current word to the new (shorter) buffer
-                candidate = (buf_text + " " + word_text).strip() if buf_text else word_text
+                candidate = (
+                    (buf_text + " " + word_text).strip() if buf_text else word_text
+                )
                 buf_words.append(w)
                 buf_text = candidate
                 if buf_start is None:
@@ -328,6 +334,7 @@ def resegment(
 
 # ── OpenAI Whisper API backend ────────────────────────────────────────────────
 
+
 def _transcribe_openai(
     audio_path: str,
     *,
@@ -370,17 +377,24 @@ def _transcribe_openai(
     raw_segments = []
 
     for seg in response.segments or []:
-        raw_segments.append({
-            "start": seg.start,
-            "end": seg.end,
-            "text": seg.text.strip(),
-        })
+        raw_segments.append(
+            {
+                "start": seg.start,
+                "end": seg.end,
+                "text": seg.text.strip(),
+            }
+        )
 
-    log.info("OpenAI transcription complete: %d segments, language=%s",
-             len(raw_segments), detected_lang)
+    log.info(
+        "OpenAI transcription complete: %d segments, language=%s",
+        len(raw_segments),
+        detected_lang,
+    )
     return raw_segments, detected_lang
 
+
 # ── Audio preprocessing ───────────────────────────────────────────────────────
+
 
 def _preprocess_audio(audio_path: str) -> str:
     """Convert audio to 16 kHz mono WAV — the native Whisper input format.
@@ -401,16 +415,27 @@ def _preprocess_audio(audio_path: str) -> str:
         try:
             probe = subprocess.run(
                 [
-                    "ffprobe", "-v", "error",
-                    "-select_streams", "a:0",
-                    "-show_entries", "stream=sample_rate,channels",
-                    "-of", "csv=p=0",
+                    "ffprobe",
+                    "-v",
+                    "error",
+                    "-select_streams",
+                    "a:0",
+                    "-show_entries",
+                    "stream=sample_rate,channels",
+                    "-of",
+                    "csv=p=0",
                     audio_path,
                 ],
-                capture_output=True, text=True, check=True,
+                capture_output=True,
+                text=True,
+                check=True,
             )
             parts = probe.stdout.strip().split(",")
-            if len(parts) == 2 and parts[0].strip() == "16000" and parts[1].strip() == "1":
+            if (
+                len(parts) == 2
+                and parts[0].strip() == "16000"
+                and parts[1].strip() == "1"
+            ):
                 log.debug("Audio already 16 kHz mono WAV — skipping preprocessing")
                 return audio_path
         except (subprocess.CalledProcessError, Exception):
@@ -425,11 +450,18 @@ def _preprocess_audio(audio_path: str) -> str:
     log.info("Preprocessing audio → 16 kHz mono WAV: %s", wav_path)
     subprocess.run(
         [
-            "ffmpeg", "-y", "-i", audio_path,
-            "-ac", "1",               # mono
-            "-ar", "16000",            # 16 kHz
-            "-sample_fmt", "s16",      # 16-bit PCM
-            "-c:a", "pcm_s16le",       # WAV codec
+            "ffmpeg",
+            "-y",
+            "-i",
+            audio_path,
+            "-ac",
+            "1",  # mono
+            "-ar",
+            "16000",  # 16 kHz
+            "-sample_fmt",
+            "s16",  # 16-bit PCM
+            "-c:a",
+            "pcm_s16le",  # WAV codec
             wav_path,
         ],
         check=True,
@@ -439,6 +471,7 @@ def _preprocess_audio(audio_path: str) -> str:
 
 
 # ── faster-whisper local backend ──────────────────────────────────────────────────
+
 
 def _transcribe_faster_whisper(
     audio_path: str,
@@ -477,7 +510,10 @@ def _transcribe_faster_whisper(
 
     log.info(
         "Transcribing with faster-whisper (model=%s, device=%s, batch=%d, compute=%s)",
-        model, device, batch_size, compute_type,
+        model,
+        device,
+        batch_size,
+        compute_type,
     )
 
     # Load model (reuse cached instance when available)
@@ -487,19 +523,25 @@ def _transcribe_faster_whisper(
         whisper_model = _whisper_cache[cache_key]
     else:
         try:
-            whisper_model = WhisperModel(model, device=device, compute_type=compute_type)
+            whisper_model = WhisperModel(
+                model, device=device, compute_type=compute_type
+            )
         except ValueError:
             fallback = "int8" if device == "cpu" else "int8_float16"
             log.warning(
                 "Compute type %s not supported on %s — falling back to %s",
-                compute_type, device, fallback,
+                compute_type,
+                device,
+                fallback,
             )
             compute_type = fallback
             cache_key = f"{model}|{device}|{compute_type}"
             if cache_key in _whisper_cache:
                 whisper_model = _whisper_cache[cache_key]
             else:
-                whisper_model = WhisperModel(model, device=device, compute_type=compute_type)
+                whisper_model = WhisperModel(
+                    model, device=device, compute_type=compute_type
+                )
         _whisper_cache[cache_key] = whisper_model
 
     # ── Pre-compute VAD clips and apply head/tail guards ──────────
@@ -558,7 +600,9 @@ def _transcribe_faster_whisper(
                 "Tail guard: adding %.1fs clip after last VAD segment",
                 tail_gap / sampling_rate,
             )
-            speech_clips.append({"start": speech_clips[-1]["end"], "end": audio_samples})
+            speech_clips.append(
+                {"start": speech_clips[-1]["end"], "end": audio_samples}
+            )
     else:
         # No speech detected at all — transcribe the full audio
         log.info("VAD detected no speech — transcribing full audio")
@@ -600,7 +644,11 @@ def _transcribe_faster_whisper(
     segments_gen, info = batched_model.transcribe(audio, **transcribe_kw)
 
     detected_lang = info.language or "unknown"
-    log.info("Detected language: %s (probability: %.2f)", detected_lang, info.language_probability)
+    log.info(
+        "Detected language: %s (probability: %.2f)",
+        detected_lang,
+        info.language_probability,
+    )
 
     # Convert generator to list of segment dicts
     raw_segments = []
@@ -613,8 +661,7 @@ def _transcribe_faster_whisper(
         # Include word-level timestamps if available
         if seg.words:
             segment_dict["words"] = [
-                {"word": w.word, "start": w.start, "end": w.end}
-                for w in seg.words
+                {"word": w.word, "start": w.start, "end": w.end} for w in seg.words
             ]
         raw_segments.append(segment_dict)
 
@@ -655,13 +702,26 @@ def _transcribe_gap(
 
         subprocess.run(
             [
-                "ffmpeg", "-y", "-loglevel", "error",
-                "-ss", str(start), "-to", str(end),
-                "-i", audio_path,
-                "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le",
+                "ffmpeg",
+                "-y",
+                "-loglevel",
+                "error",
+                "-ss",
+                str(start),
+                "-to",
+                str(end),
+                "-i",
+                audio_path,
+                "-ac",
+                "1",
+                "-ar",
+                "16000",
+                "-c:a",
+                "pcm_s16le",
                 tmp_path,
             ],
-            check=True, capture_output=True,
+            check=True,
+            capture_output=True,
         )
 
         from faster_whisper import BatchedInferencePipeline
@@ -713,6 +773,7 @@ def _transcribe_gap(
 
 # ── WhisperX local backend ────────────────────────────────────────────────────
 
+
 def _transcribe_whisperx(
     audio_path: str,
     *,
@@ -737,6 +798,7 @@ def _transcribe_whisperx(
         # speechbrain (used by pyannote/whisperx) still references them.
         # Provide no-op shims so the import chain doesn't break.
         import torchaudio
+
         if not hasattr(torchaudio, "list_audio_backends"):
             torchaudio.list_audio_backends = lambda: ["soundfile"]
         if not hasattr(torchaudio, "set_audio_backend"):
@@ -751,7 +813,10 @@ def _transcribe_whisperx(
 
     log.info(
         "Transcribing with WhisperX (model=%s, device=%s, batch=%d, compute=%s)",
-        model, device, batch_size, compute_type,
+        model,
+        device,
+        batch_size,
+        compute_type,
     )
 
     # Step 1 -- transcribe
@@ -761,13 +826,21 @@ def _transcribe_whisperx(
         fallback = "int8" if device == "cpu" else "int8_float16"
         log.warning(
             "Compute type %s not supported on %s — falling back to %s",
-            compute_type, device, fallback,
+            compute_type,
+            device,
+            fallback,
         )
         compute_type = fallback
         whisper_model = whisperx.load_model(model, device, compute_type=compute_type)
-    result = whisper_model.transcribe(audio_path, batch_size=batch_size, language=language)
+    result = whisper_model.transcribe(
+        audio_path, batch_size=batch_size, language=language
+    )
     detected_lang = result.get("language", "unknown")
-    log.info("Detected language: %s  (%d raw segments)", detected_lang, len(result["segments"]))
+    log.info(
+        "Detected language: %s  (%d raw segments)",
+        detected_lang,
+        len(result["segments"]),
+    )
 
     del whisper_model
     gc.collect()
@@ -775,9 +848,15 @@ def _transcribe_whisperx(
 
     # Step 2 -- word-level alignment
     log.info("Aligning word-level timestamps...")
-    model_a, metadata = whisperx.load_align_model(language_code=detected_lang, device=device)
+    model_a, metadata = whisperx.load_align_model(
+        language_code=detected_lang, device=device
+    )
     result = whisperx.align(
-        result["segments"], model_a, metadata, audio_path, device,
+        result["segments"],
+        model_a,
+        metadata,
+        audio_path,
+        device,
         return_char_alignments=False,
     )
 
@@ -790,7 +869,84 @@ def _transcribe_whisperx(
     return raw_segments, detected_lang
 
 
+def _transcribe_mlx_whisper(
+    audio_path: str,
+    *,
+    model: str = "mlx-community/whisper-large-v3-turbo",
+    language: str | None = None,
+    beam_size: int = 5,
+    initial_prompt: str | None = None,
+    condition_on_previous_text: bool = True,
+    vad_options: dict | None = None,
+    **_unused,
+) -> tuple[list[dict], str]:
+    """Transcribe using MLX Whisper on Apple Silicon GPU.
+
+    MLX Whisper runs natively on Apple's Metal GPU via the MLX framework,
+    delivering 10-20x faster transcription than CPU-based faster-whisper.
+
+    Requires: pip install "mazinger-dubber[transcribe-mlx]"
+
+    Returns:
+        A tuple of (segments, detected_language).
+        Each segment has 'start', 'end', 'text', and 'words' keys.
+    """
+    try:
+        import mlx_whisper
+    except ImportError as e:
+        raise ImportError(
+            "mlx-whisper not installed. Install with: pip install 'mazinger-dubber[transcribe-mlx]'\n"
+            "Or use method='faster-whisper' for CPU transcription."
+        ) from e
+
+    audio_path = _preprocess_audio(audio_path)
+
+    log.info(
+        "Transcribing with mlx-whisper (model=%s, beam=%d)",
+        model,
+        beam_size,
+    )
+
+    kwargs: dict[str, Any] = {
+        "path_or_hf_repo": model,
+        "word_timestamps": True,
+        "beam_size": beam_size,
+        "condition_on_previous_text": condition_on_previous_text,
+    }
+    if language:
+        kwargs["language"] = language
+    if initial_prompt:
+        kwargs["initial_prompt"] = initial_prompt
+    if vad_options:
+        kwargs["vad_filter"] = True
+        kwargs["vad_parameters"] = vad_options
+
+    result = mlx_whisper.transcribe(audio_path, **kwargs)
+
+    detected_lang = result.get("language", language or "unknown")
+
+    raw_segments = []
+    for seg in result.get("segments", []):
+        words = seg.get("words", [])
+        raw_segments.append(
+            {
+                "start": seg["start"],
+                "end": seg["end"],
+                "text": seg["text"].strip(),
+                "words": [
+                    {"word": w["word"], "start": w["start"], "end": w["end"]}
+                    for w in words
+                ]
+                if words
+                else [],
+            }
+        )
+
+    return raw_segments, detected_lang
+
+
 # ── LLM-based text refinement ────────────────────────────────────────────────
+
 
 def _refine_segments_llm(
     segments: list[dict],
@@ -818,13 +974,16 @@ def _refine_segments_llm(
         model=llm_model,
         temperature=0.2,
         messages=[
-            {"role": "system", "content": (
-                f"You are a transcript editor for {detected_lang} speech-to-text output. "
-                "Fix misheard words, add punctuation (commas, periods, question marks), "
-                "and correct obvious spelling errors. Keep the original meaning and word order intact. "
-                "Do NOT add, remove, or reorder content. Do NOT translate. "
-                "Return each line in the same [index] format."
-            )},
+            {
+                "role": "system",
+                "content": (
+                    f"You are a transcript editor for {detected_lang} speech-to-text output. "
+                    "Fix misheard words, add punctuation (commas, periods, question marks), "
+                    "and correct obvious spelling errors. Keep the original meaning and word order intact. "
+                    "Do NOT add, remove, or reorder content. Do NOT translate. "
+                    "Return each line in the same [index] format."
+                ),
+            },
             {"role": "user", "content": text_block},
         ],
     )
@@ -840,7 +999,7 @@ def _refine_segments_llm(
             if bracket_end > 0:
                 try:
                     idx = int(line[1:bracket_end])
-                    refined_map[idx] = line[bracket_end + 1:].strip()
+                    refined_map[idx] = line[bracket_end + 1 :].strip()
                 except ValueError:
                     pass
 
@@ -851,11 +1010,14 @@ def _refine_segments_llm(
             seg["text"] = refined_map[i]
         result.append(seg)
 
-    log.info("LLM refinement applied to %d/%d segments", len(refined_map), len(segments))
+    log.info(
+        "LLM refinement applied to %d/%d segments", len(refined_map), len(segments)
+    )
     return result
 
 
 # ── Main transcription entry point ────────────────────────────────────────────
+
 
 def transcribe(
     audio_path: str,
@@ -954,10 +1116,27 @@ def transcribe(
             compute_type=compute_type,
             language=language,
         )
+    elif method == "mlx-whisper":
+        default_model = "mlx-community/whisper-large-v3-turbo"
+        raw_segments, detected_lang = _transcribe_mlx_whisper(
+            audio_path,
+            model=model or default_model,
+            language=language,
+            beam_size=beam_size,
+            initial_prompt=initial_prompt,
+            condition_on_previous_text=condition_on_previous_text,
+            vad_options=vad_options,
+        )
     else:
-        raise ValueError(f"Unknown transcription method: {method!r}. Use 'openai', 'faster-whisper', or 'whisperx'.")
+        raise ValueError(
+            f"Unknown transcription method: {method!r}. Use 'openai', 'faster-whisper', 'whisperx', or 'mlx-whisper'."
+        )
 
-    log.info("Transcription complete: %d segments, language=%s", len(raw_segments), detected_lang)
+    log.info(
+        "Transcription complete: %d segments, language=%s",
+        len(raw_segments),
+        detected_lang,
+    )
 
     # Clean up common transcription artifacts
     raw_segments = _clean_segments(raw_segments)
@@ -972,14 +1151,18 @@ def transcribe(
 
         def _gap_fn(_path, _start, _end):
             return _transcribe_gap(
-                _path, _start, _end,
+                _path,
+                _start,
+                _end,
                 language=detected_lang,
                 beam_size=beam_size,
                 initial_prompt=initial_prompt,
             )
 
         raw_segments, _was_modified = validate_transcription(
-            raw_segments, audio_path, audio_dur,
+            raw_segments,
+            audio_path,
+            audio_dur,
             transcribe_gap_fn=_gap_fn,
         )
         if _was_modified:
@@ -992,7 +1175,8 @@ def transcribe(
     # LLM refinement: punctuation and misheard-word correction
     if refine:
         raw_segments = _refine_segments_llm(
-            raw_segments, detected_lang,
+            raw_segments,
+            detected_lang,
             api_key=openai_api_key,
             base_url=openai_base_url,
             llm_model=llm_model,
@@ -1014,7 +1198,9 @@ def transcribe(
         final_segments = raw_segments
     else:
         final_segments = resegment(raw_segments, max_chars, max_duration)
-        log.info("Resegmented: %d -> %d segments", len(raw_segments), len(final_segments))
+        log.info(
+            "Resegmented: %d -> %d segments", len(raw_segments), len(final_segments)
+        )
 
     # Save final SRT
     srt_content = _segments_to_srt(final_segments)

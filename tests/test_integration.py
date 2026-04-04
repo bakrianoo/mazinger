@@ -50,6 +50,14 @@ class TestMLXCLIIntegration:
         assert resolve_device("cpu") == "cpu"
         assert resolve_device("mlx") == "mlx"
 
+    def test_add_transcription_accepts_mlx_whisper(self):
+        from mazinger.cli._groups import add_transcription
+
+        p = argparse.ArgumentParser()
+        add_transcription(p)
+        args = p.parse_args(["--transcribe-method", "mlx-whisper"])
+        assert args.transcribe_method == "mlx-whisper"
+
 
 class TestMLXPipelineIntegration:
     def test_pipeline_dub_accepts_mlx_model_param(self):
