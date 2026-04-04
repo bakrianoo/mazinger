@@ -304,7 +304,7 @@ class _ChatterboxTTSWrapper(TTSWrapper):
 
 
 def _load_mlx_model(
-    model_name: str = "mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16",
+    model_name: str = "mlx-community/Qwen3-TTS-12Hz-0.6B-Base-bf16",
 ) -> Any:
     """Load Qwen3-TTS via MLX for Apple Silicon acceleration."""
     from mlx_audio.tts.utils import load_model as mlx_load
@@ -359,7 +359,7 @@ def load_model(
     device: str = "cuda:0",
     dtype: str = "bfloat16",
     engine: TTSEngine = "qwen",
-    mlx_model: str = "mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16",
+    mlx_model: str = "mlx-community/Qwen3-TTS-12Hz-0.6B-Base-bf16",
     chatterbox_model: str = "ResembleAI/chatterbox",
 ) -> Any:
     """Load a TTS model and return it.
@@ -404,7 +404,7 @@ def create_voice_prompt(
     engine: TTSEngine = "qwen",
     chatterbox_exaggeration: float = 0.5,
     chatterbox_cfg: float = 0.5,
-    mlx_model: str = "mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16",
+    mlx_model: str = "mlx-community/Qwen3-TTS-12Hz-0.6B-Base-bf16",
 ) -> TTSWrapper:
     """Build a reusable voice-clone prompt from a reference recording.
 

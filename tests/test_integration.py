@@ -30,8 +30,7 @@ class TestMLXCLIIntegration:
         add_tts_engine(p)
         args = p.parse_args([])
         assert "mlx-community" in args.mlx_model
-        assert "1.7B" in args.mlx_model
-        assert "Base" in args.mlx_model
+        assert "0.6B" in args.mlx_model
 
     def test_detect_device_returns_valid_string(self):
         from mazinger.cli._groups import detect_device
