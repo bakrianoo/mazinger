@@ -8,8 +8,13 @@ from typing import Any
 
 from mazinger.paths import ProjectPaths
 from mazinger.utils import (
-    save_json, load_json, get_audio_duration, LLMUsageTracker,
-    is_valid_media_file, is_valid_srt_file, is_valid_json_file,
+    save_json,
+    load_json,
+    get_audio_duration,
+    LLMUsageTracker,
+    is_valid_media_file,
+    is_valid_srt_file,
+    is_valid_json_file,
     is_valid_thumbs_meta,
 )
 
@@ -82,6 +87,7 @@ class MazingerDubber:
         chatterbox_model: str = "ResembleAI/chatterbox",
         chatterbox_exaggeration: float = 0.5,
         chatterbox_cfg: float = 0.5,
+        mlx_model: str = "mlx-community/Qwen3-TTS-12Hz-0.6B-Base-bf16",
         loudness_match: bool = True,
         mix_background: bool = True,
         background_volume: float = 0.15,
@@ -183,7 +189,9 @@ class MazingerDubber:
                 )
             else:
                 slug = download.slug_from_path(source)
-        proj = ProjectPaths(slug, base_dir=self.base_dir, target_language=target_language).ensure_dirs()
+        proj = ProjectPaths(
+            slug, base_dir=self.base_dir, target_language=target_language
+        ).ensure_dirs()
         log.info("Project: %s  Language: %s", proj.root, target_language)
 
         # -- Save video metadata when available ---------------------------
@@ -206,16 +214,21 @@ class MazingerDubber:
         # -- Resolve voice (theme / profile / explicit sample+script) -----
         if voice_theme and not (voice_sample and voice_script):
             from mazinger.profiles import generate_profile
+
             profile_dir = proj.voice_profile_dir
             profile_wav = os.path.join(profile_dir, "voice.wav")
             if os.path.isfile(profile_wav):
                 log.info("Reusing saved voice profile: %s", profile_dir)
                 from mazinger.profiles import _load_local_profile
+
                 voice_sample, voice_script = _load_local_profile(profile_dir)
             else:
                 voice_sample, voice_script = generate_profile(
-                    voice_theme, tts_language, profile_dir,
-                    device=device_for_tts, dtype=tts_dtype,
+                    voice_theme,
+                    tts_language,
+                    profile_dir,
+                    device=device_for_tts,
+                    dtype=tts_dtype,
                 )
 
         auto_clone = not voice_sample and not voice_script
@@ -275,10 +288,13 @@ class MazingerDubber:
             # to anchor Whisper's decoder on the expected vocabulary.
             _initial_prompt = transcribe.build_initial_prompt(video_meta)
             if _initial_prompt:
-                log.info("Whisper initial prompt (from metadata): %.120s…", _initial_prompt)
+                log.info(
+                    "Whisper initial prompt (from metadata): %.120s…", _initial_prompt
+                )
 
             transcribe.transcribe(
-                proj.audio, proj.source_srt,
+                proj.audio,
+                proj.source_srt,
                 method=transcribe_method,
                 model=whisper_model,
                 device=device,
@@ -292,23 +308,32 @@ class MazingerDubber:
         transcribe.clear_cache()
 
         # 2b. Select best SRT source (ASR vs YouTube) --------------------
-        source_srt_for_pipeline = proj.source_srt if use_resegmented else proj.source_raw_srt
+        source_srt_for_pipeline = (
+            proj.source_srt if use_resegmented else proj.source_raw_srt
+        )
 
         if use_youtube_subs:
             yt_orig_srt = None
-            for fname in os.listdir(proj.youtube_subs_dir) if os.path.isdir(proj.youtube_subs_dir) else []:
+            for fname in (
+                os.listdir(proj.youtube_subs_dir)
+                if os.path.isdir(proj.youtube_subs_dir)
+                else []
+            ):
                 if fname.endswith("-orig.srt") or fname.endswith("-orig.manual.srt"):
                     yt_orig_srt = os.path.join(proj.youtube_subs_dir, fname)
                     break
 
             if yt_orig_srt and os.path.exists(source_srt_for_pipeline):
                 from mazinger.review import select_srt
+
                 with open(source_srt_for_pipeline, encoding="utf-8") as fh:
                     asr_text = fh.read()
                 with open(yt_orig_srt, encoding="utf-8") as fh:
                     yt_text = fh.read()
                 choice = select_srt(
-                    asr_text, yt_text, client,
+                    asr_text,
+                    yt_text,
+                    client,
                     llm_model=self.llm_model,
                     video_meta=video_meta,
                     usage_tracker=usage_tracker,
@@ -317,9 +342,11 @@ class MazingerDubber:
                     source_srt_for_pipeline = yt_orig_srt
                     log.info("Using YouTube SRT as primary source: %s", yt_orig_srt)
 
-        log.info("Using %s SRT for translation/dubbing: %s",
-                 "resegmented" if use_resegmented else "raw",
-                 source_srt_for_pipeline)
+        log.info(
+            "Using %s SRT for translation/dubbing: %s",
+            "resegmented" if use_resegmented else "raw",
+            source_srt_for_pipeline,
+        )
         with open(source_srt_for_pipeline, encoding="utf-8") as fh:
             source_srt_text = fh.read()
 
@@ -334,16 +361,22 @@ class MazingerDubber:
             thumb_paths = load_json(proj.thumbs_meta)
         else:
             ts = thumbnails.select_timestamps(
-                source_srt_text, client, llm_model=self.llm_model,
+                source_srt_text,
+                client,
+                llm_model=self.llm_model,
                 usage_tracker=usage_tracker,
             )
             thumb_paths = thumbnails.extract_frames(
-                proj.video, ts, proj.thumbnails_dir,
+                proj.video,
+                ts,
+                proj.thumbnails_dir,
             )
             save_json(thumb_paths, proj.thumbs_meta)
 
         # 4. Describe content --------------------------------------------
-        if skip_existing and is_valid_json_file(proj.description, required_keys=("title", "summary")):
+        if skip_existing and is_valid_json_file(
+            proj.description, required_keys=("title", "summary")
+        ):
             log.info("Skipping description (file exists)")
             description = load_json(proj.description)
         elif not has_video:
@@ -351,7 +384,9 @@ class MazingerDubber:
             description = {"title": "", "summary": "", "keypoints": [], "keywords": []}
         else:
             description = describe.describe_content(
-                source_srt_text, thumb_paths, client,
+                source_srt_text,
+                thumb_paths,
+                client,
                 llm_model=self.llm_model,
                 video_meta=video_meta,
                 usage_tracker=usage_tracker,
@@ -366,8 +401,11 @@ class MazingerDubber:
                     source_srt_text = fh.read()
             else:
                 from mazinger import review
+
                 source_srt_text = review.review_srt(
-                    source_srt_text, description, client,
+                    source_srt_text,
+                    description,
+                    client,
                     llm_model=self.llm_model,
                     source_language=source_language,
                     keep_technical_english=keep_technical_english,
@@ -380,6 +418,7 @@ class MazingerDubber:
         # -- Auto-clone voice from source audio ---------------------------
         if auto_clone:
             from mazinger.profiles import create_auto_clone_profile
+
             profile_dir = proj.voice_profile_dir
             profile_wav = os.path.join(profile_dir, "voice.wav")
             if skip_existing and is_valid_media_file(profile_wav):
@@ -392,7 +431,9 @@ class MazingerDubber:
                     else source_srt_for_pipeline
                 )
                 voice_sample = create_auto_clone_profile(
-                    proj.audio, clone_srt, profile_dir,
+                    proj.audio,
+                    clone_srt,
+                    profile_dir,
                 )
 
         # 5. Translate ---------------------------------------------------
@@ -402,15 +443,26 @@ class MazingerDubber:
                 translated_srt = fh.read()
         else:
             translated_srt = translate.translate_srt(
-                source_srt_text, description, thumb_paths, client,
+                source_srt_text,
+                description,
+                thumb_paths,
+                client,
                 llm_model=self.llm_model,
                 source_language=source_language,
                 target_language=target_language,
                 translate_technical_terms=translate_technical_terms,
                 video_meta=video_meta,
                 usage_tracker=usage_tracker,
-                **(dict(words_per_second=words_per_second) if words_per_second is not None else {}),
-                **(dict(duration_budget=duration_budget) if duration_budget is not None else {}),
+                **(
+                    dict(words_per_second=words_per_second)
+                    if words_per_second is not None
+                    else {}
+                ),
+                **(
+                    dict(duration_budget=duration_budget)
+                    if duration_budget is not None
+                    else {}
+                ),
             )
             with open(proj.translated_raw_srt, "w", encoding="utf-8") as fh:
                 fh.write(translated_srt)
@@ -422,7 +474,9 @@ class MazingerDubber:
             durs = sorted(e - s for _, s, e, _ in src_blocks) if src_blocks else [5.0]
             median_dur = durs[len(durs) // 2]
             effective_mode = "long" if median_dur < 3.0 else "short"
-            log.info("Auto segment mode: median=%.1fs -> %s", median_dur, effective_mode)
+            log.info(
+                "Auto segment mode: median=%.1fs -> %s", median_dur, effective_mode
+            )
 
         if skip_existing and is_valid_srt_file(proj.final_srt):
             log.info("Skipping re-segmentation (file exists)")
@@ -437,13 +491,15 @@ class MazingerDubber:
                 fh.write(resegmented)
         else:
             resegmented = resegment.resegment_srt(
-                translated_srt, client=client, llm_model=self.llm_model,
+                translated_srt,
+                client=client,
+                llm_model=self.llm_model,
                 usage_tracker=usage_tracker,
             )
             with open(proj.final_srt, "w", encoding="utf-8") as fh:
                 fh.write(resegmented)
 
-        if hasattr(client, 'unload_model'):
+        if hasattr(client, "unload_model"):
             client.unload_model(self.llm_model)
 
         # 7. TTS ---------------------------------------------------------
@@ -453,18 +509,26 @@ class MazingerDubber:
         original_duration = get_audio_duration(proj.audio)
 
         tts_model = tts.load_model(
-            tts_model_name, device=device_for_tts,
-            dtype=tts_dtype, engine=tts_engine,
+            tts_model_name,
+            device=device_for_tts,
+            dtype=tts_dtype,
+            engine=tts_engine,
             chatterbox_model=chatterbox_model,
+            mlx_model=mlx_model,
         )
         voice_prompt = tts.create_voice_prompt(
-            tts_model, voice_sample, ref_text,
+            tts_model,
+            voice_sample,
+            ref_text,
             engine=tts_engine,
             chatterbox_exaggeration=chatterbox_exaggeration,
             chatterbox_cfg=chatterbox_cfg,
         )
         segment_info = tts.synthesize_segments(
-            tts_model, voice_prompt, srt_entries, proj.tts_segments_dir,
+            tts_model,
+            voice_prompt,
+            srt_entries,
+            proj.tts_segments_dir,
             language=tts_language,
             force_reset=force_reset,
         )
@@ -472,7 +536,9 @@ class MazingerDubber:
 
         # 8. Assemble final audio ----------------------------------------
         assemble.assemble_timeline(
-            segment_info, original_duration, proj.final_audio,
+            segment_info,
+            original_duration,
+            proj.final_audio,
             tempo_mode=tempo_mode,
             fixed_tempo=fixed_tempo,
             max_tempo=max_tempo,
@@ -481,7 +547,9 @@ class MazingerDubber:
         # 8b. Post-process: loudness + background -------------------------
         if loudness_match or mix_background:
             assemble.post_process(
-                proj.final_audio, proj.audio, proj.final_audio,
+                proj.final_audio,
+                proj.audio,
+                proj.final_audio,
                 loudness_match=loudness_match,
                 mix_background=mix_background,
                 background_volume=background_volume,
@@ -497,6 +565,7 @@ class MazingerDubber:
                 log.warning("No source video available — skipping video output")
             elif subtitle_style:
                 from mazinger.subtitle import burn_subtitles
+
                 if subtitle_source == "translated":
                     # Prefer the pre-merged SRT for on-screen display;
                     # final_srt may contain long merged chunks unsuitable
@@ -511,8 +580,11 @@ class MazingerDubber:
                 else:
                     srt_path = subtitle_source
                 burn_subtitles(
-                    proj.video, proj.final_video, srt_path,
-                    subtitle_style, audio_path=proj.final_audio,
+                    proj.video,
+                    proj.final_video,
+                    srt_path,
+                    subtitle_style,
+                    audio_path=proj.final_audio,
                 )
             else:
                 assemble.mux_video(proj.video, proj.final_audio, proj.final_video)

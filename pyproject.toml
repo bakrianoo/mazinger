@@ -76,6 +76,17 @@ all-chatterbox = [
     "mazinger[transcribe-faster,tts-chatterbox,audio-enhance]",
 ]
 
+# TTS with MLX Qwen3-TTS for Apple Silicon (8x speedup on M-series)
+tts-mlx = [
+    "mlx-audio>=0.4.2",
+    "mlx>=0.20",
+    "soundfile>=0.12",
+]
+# Full pipeline with MLX Qwen3-TTS — Apple Silicon optimized
+all-mlx = [
+    "mazinger[transcribe-faster,tts-mlx,audio-enhance]",
+]
+
 [project.scripts]
 mazinger = "mazinger.cli:main"
 

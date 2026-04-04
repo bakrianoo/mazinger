@@ -27,16 +27,24 @@ def _remove_from_cache(obj: Any) -> None:
     for k in keys:
         del _model_cache[k]
 
+
 # ═══════════════════════════════════════════════════════════════════════════════
 #  TTS Engine Type
 # ═══════════════════════════════════════════════════════════════════════════════
 
-TTSEngine = Literal["qwen", "chatterbox"]
+TTSEngine = Literal["qwen", "chatterbox", "mlx"]
 
 SUPPORTED_LANGUAGES = (
-    "Chinese", "English", "Japanese", "Korean",
-    "German", "French", "Russian", "Portuguese",
-    "Spanish", "Italian",
+    "Chinese",
+    "English",
+    "Japanese",
+    "Korean",
+    "German",
+    "French",
+    "Russian",
+    "Portuguese",
+    "Spanish",
+    "Italian",
 )
 
 
@@ -53,6 +61,7 @@ def validate_language(language: str) -> None:
 #  Base Adapter
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 class TTSWrapper(abc.ABC):
     """Unified adapter for TTS engines.
 
@@ -63,11 +72,14 @@ class TTSWrapper(abc.ABC):
     engine: str
 
     @abc.abstractmethod
-    def synthesize(self, text: str, language: str = "English") -> tuple[np.ndarray, int]:
+    def synthesize(
+        self, text: str, language: str = "English"
+    ) -> tuple[np.ndarray, int]:
         """Generate audio for *text*.  Returns ``(audio_array, sample_rate)``."""
 
     def synthesize_batch(
-        self, items: list[tuple[str, str]],
+        self,
+        items: list[tuple[str, str]],
     ) -> list[tuple[np.ndarray, int]]:
         """Synthesize multiple ``(text, language)`` pairs.
 
@@ -88,6 +100,7 @@ class TTSWrapper(abc.ABC):
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Qwen3-TTS Backend
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 def _load_qwen_model(
     model_name: str = "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
@@ -112,7 +125,8 @@ def _load_qwen_model(
         _is_cpu or not torch.cuda.is_bf16_supported()
     ):
         log.warning(
-            "bfloat16 not supported on %s — falling back to float32", device,
+            "bfloat16 not supported on %s — falling back to float32",
+            device,
         )
         torch_dtype = torch.float32
         dtype = "float32"
@@ -124,13 +138,17 @@ def _load_qwen_model(
         dtype = "float32"
 
     model = Qwen3TTSModel.from_pretrained(
-        model_name, device_map=device, dtype=torch_dtype,
+        model_name,
+        device_map=device,
+        dtype=torch_dtype,
     )
     log.info("Loaded Qwen TTS model: %s on %s (%s)", model_name, device, dtype)
     return model
 
 
-def _create_qwen_voice_prompt(model: Any, ref_audio: str, ref_text: str | None = None) -> Any:
+def _create_qwen_voice_prompt(
+    model: Any, ref_audio: str, ref_text: str | None = None
+) -> Any:
     """Build a reusable voice-clone prompt for Qwen3-TTS."""
     x_vector_only = ref_text is None
     prompt = model.create_voice_clone_prompt(
@@ -138,7 +156,11 @@ def _create_qwen_voice_prompt(model: Any, ref_audio: str, ref_text: str | None =
         ref_text=ref_text or "",
         x_vector_only_mode=x_vector_only,
     )
-    log.info("Qwen voice clone prompt created from %s (x_vector_only=%s)", ref_audio, x_vector_only)
+    log.info(
+        "Qwen voice clone prompt created from %s (x_vector_only=%s)",
+        ref_audio,
+        x_vector_only,
+    )
     return prompt
 
 
@@ -151,24 +173,28 @@ def _synthesize_qwen(
     """Generate audio using Qwen3-TTS. Returns (audio_array, sample_rate)."""
     validate_language(language)
     wavs, sr = model.generate_voice_clone(
-        text=text, language=language, voice_clone_prompt=voice_prompt,
+        text=text,
+        language=language,
+        voice_clone_prompt=voice_prompt,
     )
     return wavs[0], sr
 
 
 class _QwenTTSWrapper(TTSWrapper):
-
     engine = "qwen"
 
     def __init__(self, model: Any, voice_prompt: Any):
         self.model = model
         self.voice_prompt = voice_prompt
 
-    def synthesize(self, text: str, language: str = "English") -> tuple[np.ndarray, int]:
+    def synthesize(
+        self, text: str, language: str = "English"
+    ) -> tuple[np.ndarray, int]:
         return _synthesize_qwen(self.model, self.voice_prompt, text, language)
 
     def unload(self) -> None:
         import torch
+
         _remove_from_cache(self.model)
         del self.voice_prompt, self.model
         gc.collect()
@@ -196,7 +222,9 @@ def design_voice(
     validate_language(language)
     model = load_model(VOICE_DESIGN_MODEL, device=device, dtype=dtype, engine="qwen")
     wavs, sr = model.generate_voice_design(
-        text=text, language=language, instruct=instruct,
+        text=text,
+        language=language,
+        instruct=instruct,
     )
     unload_model(model, force=True)
     return wavs[0], sr
@@ -206,7 +234,10 @@ def design_voice(
 #  Chatterbox Backend
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _load_chatterbox_model(device: str = "cuda", model_name: str = "ResembleAI/chatterbox") -> Any:
+
+def _load_chatterbox_model(
+    device: str = "cuda", model_name: str = "ResembleAI/chatterbox"
+) -> Any:
     """Load a Chatterbox TTS model and return it."""
     from chatterbox.tts import ChatterboxTTS
 
@@ -237,7 +268,6 @@ def _synthesize_chatterbox(
 
 
 class _ChatterboxTTSWrapper(TTSWrapper):
-
     engine = "chatterbox"
 
     def __init__(
@@ -252,14 +282,20 @@ class _ChatterboxTTSWrapper(TTSWrapper):
         self.exaggeration = exaggeration
         self.cfg_weight = cfg_weight
 
-    def synthesize(self, text: str, language: str = "English") -> tuple[np.ndarray, int]:
+    def synthesize(
+        self, text: str, language: str = "English"
+    ) -> tuple[np.ndarray, int]:
         return _synthesize_chatterbox(
-            self.model, self.ref_audio_path, text,
-            self.exaggeration, self.cfg_weight,
+            self.model,
+            self.ref_audio_path,
+            text,
+            self.exaggeration,
+            self.cfg_weight,
         )
 
     def unload(self) -> None:
         import torch
+
         _remove_from_cache(self.model)
         del self.model
         gc.collect()
@@ -267,18 +303,63 @@ class _ChatterboxTTSWrapper(TTSWrapper):
         log.info("Chatterbox TTS model unloaded, GPU memory freed.")
 
 
+def _load_mlx_model(
+    model_name: str = "mlx-community/Qwen3-TTS-12Hz-0.6B-Base-bf16",
+) -> Any:
+    """Load Qwen3-TTS via MLX for Apple Silicon acceleration."""
+    from mlx_audio.tts.utils import load_model as mlx_load
 
+    model = mlx_load(model_name)
+    log.info("Loaded MLX Qwen3-TTS model: %s", model_name)
+    return model
+
+
+class _MLXTTSWrapper(TTSWrapper):
+    engine = "mlx"
+
+    def __init__(self, model: Any, ref_audio: str, ref_text: str | None = None):
+        self.model = model
+        self.ref_audio_path = ref_audio
+        self.ref_text = ref_text
+
+    def synthesize(
+        self, text: str, language: str = "English"
+    ) -> tuple[np.ndarray, int]:
+        results = list(
+            self.model.generate(
+                text=text,
+                ref_audio=self.ref_audio_path,
+                ref_text=self.ref_text,
+                lang_code="auto",
+            )
+        )
+        audio = np.array(results[0].audio)
+        return audio, getattr(results[0], "sample_rate", 24000)
+
+    def unload(self) -> None:
+        _remove_from_cache(self.model)
+        del self.model
+        gc.collect()
+        try:
+            import mlx.core as mx
+
+            mx.clear_cache()
+        except ImportError:
+            pass
+        log.info("MLX Qwen3-TTS model unloaded, memory freed.")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Public API
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 def load_model(
     model_name: str = "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
     device: str = "cuda:0",
     dtype: str = "bfloat16",
     engine: TTSEngine = "qwen",
+    mlx_model: str = "mlx-community/Qwen3-TTS-12Hz-0.6B-Base-bf16",
     chatterbox_model: str = "ResembleAI/chatterbox",
 ) -> Any:
     """Load a TTS model and return it.
@@ -293,7 +374,11 @@ def load_model(
     Returns:
         The loaded model instance.
     """
-    name = chatterbox_model if engine == "chatterbox" else model_name
+    name = (
+        chatterbox_model
+        if engine == "chatterbox"
+        else (mlx_model if engine == "mlx" else model_name)
+    )
     key = _cache_key(engine, name, device, dtype)
     if key in _model_cache:
         log.info("Reusing cached TTS model: %s", key)
@@ -303,6 +388,8 @@ def load_model(
         model = _load_qwen_model(model_name, device, dtype)
     elif engine == "chatterbox":
         model = _load_chatterbox_model(device, chatterbox_model)
+    elif engine == "mlx":
+        model = _load_mlx_model(mlx_model)
     else:
         raise ValueError(f"Unknown TTS engine: {engine!r}")
 
@@ -317,6 +404,7 @@ def create_voice_prompt(
     engine: TTSEngine = "qwen",
     chatterbox_exaggeration: float = 0.5,
     chatterbox_cfg: float = 0.5,
+    mlx_model: str = "mlx-community/Qwen3-TTS-12Hz-0.6B-Base-bf16",
 ) -> TTSWrapper:
     """Build a reusable voice-clone prompt from a reference recording.
 
@@ -339,8 +427,14 @@ def create_voice_prompt(
     elif engine == "chatterbox":
         log.info("Chatterbox voice clone configured from %s", ref_audio)
         return _ChatterboxTTSWrapper(
-            model, ref_audio, chatterbox_exaggeration, chatterbox_cfg,
+            model,
+            ref_audio,
+            chatterbox_exaggeration,
+            chatterbox_cfg,
         )
+    elif engine == "mlx":
+        log.info("MLX Qwen3-TTS voice clone configured from %s", ref_audio)
+        return _MLXTTSWrapper(model, ref_audio, ref_text)
     else:
         raise ValueError(f"Unknown TTS engine: {engine!r}")
 
@@ -374,6 +468,7 @@ def synthesize_segments(
     """
     if force_reset and os.path.isdir(output_dir):
         import glob
+
         for f in glob.glob(os.path.join(output_dir, "seg_*.wav")):
             os.remove(f)
         log.info("Force-reset: cleared existing segments in %s", output_dir)
@@ -409,8 +504,11 @@ def synthesize_segments(
     # Synthesize pending segments one-by-one, saving each WAV immediately
     # so that already-produced files survive a crash and are cached on retry.
     if pending:
-        log.info("TTS: %d segments to synthesize (%d cached)",
-                 len(pending), len(srt_entries) - len(pending))
+        log.info(
+            "TTS: %d segments to synthesize (%d cached)",
+            len(pending),
+            len(srt_entries) - len(pending),
+        )
         use_wrapper = isinstance(voice_prompt, TTSWrapper)
         total = len(pending)
 
@@ -421,7 +519,9 @@ def synthesize_segments(
             else:
                 # Legacy Qwen API (backward compatibility)
                 wavs, sr = model.generate_voice_clone(
-                    text=text, language=language, voice_clone_prompt=voice_prompt,
+                    text=text,
+                    language=language,
+                    voice_clone_prompt=voice_prompt,
                 )
                 audio_data = wavs[0]
 
@@ -431,21 +531,27 @@ def synthesize_segments(
     produced = sum(1 for s in segment_info if s["wav_path"])
     skipped = sum(1 for s in segment_info if s.get("_skipped"))
     overflow_segs = [
-        s for s in segment_info
+        s
+        for s in segment_info
         if s["wav_path"] and s["actual_dur"] > s["target_dur"] * 1.05
     ]
     log.info(
         "Synthesised %d/%d segments (%d cached) -> %s",
-        produced, len(srt_entries), skipped, output_dir,
+        produced,
+        len(srt_entries),
+        skipped,
+        output_dir,
     )
     if overflow_segs:
         total_overflow = sum(s["actual_dur"] - s["target_dur"] for s in overflow_segs)
         log.warning(
             "%d/%d segments exceed target duration (total overflow: %.2fs). "
             "Segments: %s",
-            len(overflow_segs), len(srt_entries), total_overflow,
+            len(overflow_segs),
+            len(srt_entries),
+            total_overflow,
             ", ".join(
-                f'{s["idx"]}({s["actual_dur"]:.1f}s/{s["target_dur"]:.1f}s)'
+                f"{s['idx']}({s['actual_dur']:.1f}s/{s['target_dur']:.1f}s)"
                 for s in overflow_segs
             ),
         )

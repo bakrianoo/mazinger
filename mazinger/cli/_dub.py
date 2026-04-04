@@ -5,10 +5,20 @@ from __future__ import annotations
 import argparse
 
 from mazinger.cli._groups import (
-    add_common, add_llm, add_segment_mode, add_slice, add_source,
-    add_subtitles, add_tempo, add_tts_engine, add_transcription,
-    add_translation, add_voice,
-    resolve_voice, subtitle_style_from_args, tempo_mode_from_args,
+    add_common,
+    add_llm,
+    add_segment_mode,
+    add_slice,
+    add_source,
+    add_subtitles,
+    add_tempo,
+    add_tts_engine,
+    add_transcription,
+    add_translation,
+    add_voice,
+    resolve_voice,
+    subtitle_style_from_args,
+    tempo_mode_from_args,
 )
 
 
@@ -20,29 +30,64 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     add_tts_engine(p)
     add_llm(p)
     add_slice(p)
-    p.add_argument("--device", default="auto", help="Device: auto (default), cuda, or cpu.")
-    p.add_argument("--use-resegmented", action="store_true",
-                   help="Translate from the resegmented SRT instead of the raw transcript.")
-    p.add_argument("--output-type", choices=["audio", "video"], default="audio",
-                   help="Output type: 'audio' (default) or 'video'.")
+    p.add_argument(
+        "--device", default="auto", help="Device: auto (default), cuda, or cpu."
+    )
+    p.add_argument(
+        "--use-resegmented",
+        action="store_true",
+        help="Translate from the resegmented SRT instead of the raw transcript.",
+    )
+    p.add_argument(
+        "--output-type",
+        choices=["audio", "video"],
+        default="audio",
+        help="Output type: 'audio' (default) or 'video'.",
+    )
     add_subtitles(p)
     add_tempo(p)
     add_segment_mode(p)
     add_translation(p)
-    p.add_argument("--asr-review", action="store_true", default=False,
-                   help="Review ASR transcript with LLM to fix typos and punctuation.")
-    p.add_argument("--keep-technical-english", action="store_true", default=False,
-                   help="Convert technical terms to English in the source transcript (requires --asr-review).")
-    p.add_argument("--youtube-subs", action="store_true", default=False,
-                   help="Download YouTube subtitles and compare with ASR to pick the best source.")
-    p.add_argument("--no-loudness-match", action="store_true",
-                   help="Skip loudness normalisation against the original audio.")
-    p.add_argument("--mix-background", action="store_true", default=False,
-                   help="Extract and mix background audio from the original.")
-    p.add_argument("--background-volume", type=float, default=0.15,
-                   help="Background audio mix level, 0.0-1.0 (default: 0.15).")
-    p.add_argument("--force-reset", action="store_true",
-                   help="Discard all cached outputs and re-run every stage.")
+    p.add_argument(
+        "--asr-review",
+        action="store_true",
+        default=False,
+        help="Review ASR transcript with LLM to fix typos and punctuation.",
+    )
+    p.add_argument(
+        "--keep-technical-english",
+        action="store_true",
+        default=False,
+        help="Convert technical terms to English in the source transcript (requires --asr-review).",
+    )
+    p.add_argument(
+        "--youtube-subs",
+        action="store_true",
+        default=False,
+        help="Download YouTube subtitles and compare with ASR to pick the best source.",
+    )
+    p.add_argument(
+        "--no-loudness-match",
+        action="store_true",
+        help="Skip loudness normalisation against the original audio.",
+    )
+    p.add_argument(
+        "--mix-background",
+        action="store_true",
+        default=False,
+        help="Extract and mix background audio from the original.",
+    )
+    p.add_argument(
+        "--background-volume",
+        type=float,
+        default=0.15,
+        help="Background audio mix level, 0.0-1.0 (default: 0.15).",
+    )
+    p.add_argument(
+        "--force-reset",
+        action="store_true",
+        help="Discard all cached outputs and re-run every stage.",
+    )
     add_common(p)
 
 
@@ -80,6 +125,7 @@ def handler(args: argparse.Namespace) -> None:
         chatterbox_model=args.chatterbox_model,
         chatterbox_exaggeration=args.chatterbox_exaggeration,
         chatterbox_cfg=args.chatterbox_cfg,
+        mlx_model=args.mlx_model,
         cookies_from_browser=args.cookies_from_browser,
         cookies=args.cookies,
         quality=args.quality,
