@@ -39,7 +39,7 @@ mazinger dub <source> [options]
 | `--voice-script` | — | Path to transcript of the voice sample (or inline text) |
 | `--transcribe-method` | `faster-whisper` | `openai`, `faster-whisper`, `whisperx`, or `mlx-whisper` |
 | `--whisper-model` | varies by method | Whisper model name |
-| `--mlx-whisper-model` | `mlx-community/whisper-large-v3-turbo-asr-fp16` | MLX Whisper model name |
+| `--mlx-whisper-model` | `mlx-community/whisper-large-v3-turbo` | MLX Whisper model name |
 | `--beam-size` | `5` | Beam size for decoding (faster-whisper/whisperx) |
 | `--device` | `auto` | `auto`, `cuda`, or `cpu` |
 | `--source-language` | `auto` | Source language for translation (or `auto` to detect) |
