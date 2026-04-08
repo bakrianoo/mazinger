@@ -66,7 +66,7 @@ pip install "mazinger[transcribe-mlx]"         # MLX Whisper (Apple Silicon)
 # Full bundles
 pip install "mazinger[all-qwen]"              # faster-whisper + Qwen3-TTS
 pip install "mazinger[all-chatterbox]"        # faster-whisper + Chatterbox
-pip install "mazinger[all-mlx]"               # faster-whisper + MLX Whisper + MLX Qwen3-TTS
+pip install "mazinger[all-mlx]"               # MLX Whisper + MLX Qwen3-TTS
 ```
 
 > Qwen and Chatterbox require different `transformers` versions and cannot share an environment.
