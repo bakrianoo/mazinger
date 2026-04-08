@@ -278,10 +278,12 @@ def _load_mlx_model(
     mlx_model: str = DEFAULT_MLX_MODEL,
 ) -> Any:
     import platform
-    if platform.system() != "Darwin":
+    system = platform.system()
+    machine = platform.machine().lower()
+    if system != "Darwin" or machine != "arm64":
         raise RuntimeError(
             "MLX TTS requires Apple Silicon (M1/M2/M3/M4/M5). "
-            f"Current platform: {platform.system()} ({platform.machine()}). "
+            f"Current platform: {system} ({platform.machine()}). "
             "Use engine='qwen' or engine='chatterbox' instead."
         )
     try:
