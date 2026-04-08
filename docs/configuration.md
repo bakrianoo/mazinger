@@ -79,7 +79,7 @@ TTS synthesis has finer granularity — individual segment WAVs (`seg_0001.wav`,
 | OpenAI Whisper API | `openai` | `whisper-1` | No | Pay per audio minute |
 | faster-whisper | `faster-whisper` | `large-v3` | Yes (or CPU) | Free |
 | WhisperX | `whisperx` | `large-v3` | Yes | Free |
-| MLX Whisper | `mlx-whisper` | `mlx-community/whisper-large-v3-turbo-asr-fp16` | Apple Silicon | Free |
+| MLX Whisper | `mlx-whisper` | `mlx-community/whisper-large-v3-turbo` | Apple Silicon | Free |
 
 **Choosing a method:**
 
