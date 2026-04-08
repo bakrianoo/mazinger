@@ -85,9 +85,9 @@ tts-mlx = [
 transcribe-mlx = [
     "mlx-whisper>=0.4",
 ]
-# Full pipeline with MLX (transcribe-mlx + tts-mlx) — Apple Silicon only
+# Full pipeline with MLX + faster-whisper fallback/support — Apple Silicon only
 all-mlx = [
-    "mazinger[transcribe-mlx,tts-mlx]",
+    "mazinger[transcribe-faster,transcribe-mlx,tts-mlx]",
 ]
 
 [project.scripts]
