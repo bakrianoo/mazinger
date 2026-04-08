@@ -569,12 +569,14 @@ def _transcribe_faster_whisper(
         log.info("VAD detected no speech — transcribing full audio")
         speech_clips = [{"start": 0, "end": audio_samples}]
 
-    # Convert from sample indices to seconds (the batched pipeline
-    # expects seconds when clip_timestamps is provided externally).
-    speech_clips_sec = [
-        {"start": c["start"] / sampling_rate, "end": c["end"] / sampling_rate}
-        for c in speech_clips
-    ]
+    # Convert from sample indices to a flat list of seconds:
+    #   [start1, end1, start2, end2, ...]
+    # BatchedInferencePipeline.transcribe() expects clip_timestamps
+    # as a flat sequence of boundary pairs in seconds.
+    speech_clips_sec: list[float] = []
+    for c in speech_clips:
+        speech_clips_sec.append(c["start"] / sampling_rate)
+        speech_clips_sec.append(c["end"] / sampling_rate)
 
     # Use batched inference for better performance
     batched_model = BatchedInferencePipeline(model=whisper_model)

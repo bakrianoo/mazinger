@@ -62,6 +62,15 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> None:
+    # Windows console defaults to cp1252 which cannot encode Arabic/CJK/etc.
+    # Reconfigure stdout/stderr to UTF-8 so project names and log messages
+    # with non-Latin characters don't crash with UnicodeEncodeError.
+    import sys
+    if sys.platform == "win32":
+        for stream in (sys.stdout, sys.stderr):
+            if hasattr(stream, "reconfigure"):
+                stream.reconfigure(encoding="utf-8", errors="replace")
+
     parser = _build_parser()
     args = parser.parse_args(argv)
     _configure_logging(getattr(args, "verbose", False))
