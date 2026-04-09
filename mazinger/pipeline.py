@@ -85,6 +85,7 @@ class MazingerDubber:
         chatterbox_model: str = "ResembleAI/chatterbox",
         chatterbox_exaggeration: float = 0.5,
         chatterbox_cfg: float = 0.5,
+        pocket_voice: str | None = None,
         loudness_match: bool = True,
         mix_background: bool = True,
         background_volume: float = 0.15,
@@ -462,8 +463,12 @@ class MazingerDubber:
             chatterbox_model=chatterbox_model,
             mlx_model=mlx_model,
         )
+        # Pocket TTS: allow predefined voice name to override ref audio
+        _ref_audio = voice_sample
+        if tts_engine == "pocket" and pocket_voice:
+            _ref_audio = pocket_voice
         voice_prompt = tts.create_voice_prompt(
-            tts_model, voice_sample, ref_text,
+            tts_model, _ref_audio, ref_text,
             engine=tts_engine,
             chatterbox_exaggeration=chatterbox_exaggeration,
             chatterbox_cfg=chatterbox_cfg,

@@ -83,6 +83,7 @@ def handler(args: argparse.Namespace) -> None:
         chatterbox_model=args.chatterbox_model,
         chatterbox_exaggeration=args.chatterbox_exaggeration,
         chatterbox_cfg=args.chatterbox_cfg,
+        pocket_voice=getattr(args, "pocket_voice", None),
         cookies_from_browser=args.cookies_from_browser,
         cookies=args.cookies,
         quality=args.quality,
