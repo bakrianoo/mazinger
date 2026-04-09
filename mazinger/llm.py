@@ -1,8 +1,9 @@
-"""LLM client factory with native Ollama support.
+"""LLM client factory with native Ollama and Gemini support.
 
 When the base URL points to an Ollama server, requests are routed through
 the native ``/api/chat`` endpoint so that parameters like ``think`` are
-handled correctly.  For all other providers the standard OpenAI SDK is used.
+handled correctly.  When a Gemini API key is provided, the Google GenAI
+SDK is used.  For all other providers the standard OpenAI SDK is used.
 
 Streaming
 ---------
@@ -255,6 +256,169 @@ class _OllamaClient:
             log.debug("Ollama unload request failed (non-critical)", exc_info=True)
 
 
+# -- Gemini (Google GenAI) native chat ------------------------------------
+
+class _GeminiChatCompletions:
+    """Translate OpenAI-style ``create()`` calls to Google GenAI SDK."""
+
+    _UNSUPPORTED_KEYS = frozenset({
+        "repeat_penalty", "top_k", "num_predict", "think",
+        "compression_ratio_threshold", "log_prob_threshold",
+        "no_speech_threshold",
+    })
+
+    def __init__(self, api_key: str) -> None:
+        try:
+            from google import genai
+        except ImportError as e:
+            raise ImportError(
+                "google-genai not installed. Install with: "
+                "pip install 'mazinger[llm-gemini]'\n"
+                "Or use an OpenAI-compatible provider."
+            ) from e
+        self._client = genai.Client(api_key=api_key)
+
+    @staticmethod
+    def _convert_messages(
+        messages: list[dict[str, Any]],
+    ) -> tuple[str | None, list[dict[str, Any]]]:
+        """Split OpenAI messages into Gemini system_instruction + contents."""
+        import base64
+        from google.genai import types
+
+        system_text: list[str] = []
+        contents: list[dict[str, Any]] = []
+
+        for msg in messages:
+            role = msg["role"]
+            raw_content = msg.get("content", "")
+
+            if role == "system":
+                if isinstance(raw_content, str):
+                    system_text.append(raw_content)
+                elif isinstance(raw_content, list):
+                    system_text.extend(
+                        p["text"] for p in raw_content if p.get("type") == "text"
+                    )
+                continue
+
+            gemini_role = "model" if role == "assistant" else "user"
+            parts: list[types.Part] = []
+
+            if isinstance(raw_content, str):
+                parts.append(types.Part.from_text(text=raw_content))
+            elif isinstance(raw_content, list):
+                for block in raw_content:
+                    if block.get("type") == "text":
+                        parts.append(types.Part.from_text(text=block["text"]))
+                    elif block.get("type") == "image_url":
+                        url = block.get("image_url", {}).get("url", "")
+                        if url.startswith("data:"):
+                            header, b64_data = url.split(",", 1)
+                            mime = header.split(":")[1].split(";")[0]
+                            parts.append(types.Part.from_bytes(
+                                data=base64.b64decode(b64_data),
+                                mime_type=mime,
+                            ))
+
+            if parts:
+                contents.append(types.Content(role=gemini_role, parts=parts))
+
+        system_instruction = "\n".join(system_text) if system_text else None
+        return system_instruction, contents
+
+    def create(
+        self,
+        *,
+        model: str,
+        messages: list[dict[str, Any]],
+        temperature: float = 1.0,
+        **kwargs: Any,
+    ) -> _ChatCompletion:
+        from google.genai import types
+
+        system_instruction, contents = self._convert_messages(messages)
+
+        config_kw: dict[str, Any] = {"temperature": temperature}
+        if system_instruction:
+            config_kw["system_instruction"] = system_instruction
+        if "top_p" in kwargs:
+            config_kw["top_p"] = kwargs["top_p"]
+        if "seed" in kwargs:
+            config_kw["seed"] = kwargs["seed"]
+        max_tokens = kwargs.get("max_tokens") or kwargs.get("num_predict")
+        if max_tokens:
+            config_kw["max_output_tokens"] = max_tokens
+        if "frequency_penalty" in kwargs:
+            config_kw["frequency_penalty"] = kwargs["frequency_penalty"]
+        if "presence_penalty" in kwargs:
+            config_kw["presence_penalty"] = kwargs["presence_penalty"]
+
+        callback = get_stream_callback()
+
+        def _call(kw: dict[str, Any]) -> _ChatCompletion:
+            config = types.GenerateContentConfig(**kw)
+
+            if not callback:
+                response = self._client.models.generate_content(
+                    model=model, contents=contents, config=config,
+                )
+                text = response.text or ""
+                usage = response.usage_metadata
+                p_tok = getattr(usage, "prompt_token_count", 0) or 0
+                c_tok = getattr(usage, "response_token_count", 0) or 0
+            else:
+                parts: list[str] = []
+                p_tok = c_tok = 0
+                for chunk in self._client.models.generate_content_stream(
+                    model=model, contents=contents, config=config,
+                ):
+                    token = chunk.text or ""
+                    if token:
+                        parts.append(token)
+                        try:
+                            callback(token)
+                        except Exception:
+                            pass
+                    usage = chunk.usage_metadata
+                    if usage:
+                        p_tok = getattr(usage, "prompt_token_count", 0) or 0
+                        c_tok = getattr(usage, "response_token_count", 0) or 0
+                text = "".join(parts)
+
+            return _ChatCompletion(
+                choices=[_Choice(_Message("assistant", text))],
+                usage=_Usage(p_tok, c_tok),
+            )
+
+        try:
+            return _call(config_kw)
+        except Exception as exc:
+            err_msg = str(exc).lower()
+            if "penalty" in err_msg and (
+                "frequency_penalty" in config_kw or "presence_penalty" in config_kw
+            ):
+                log.debug("Gemini rejected penalty params, retrying without them")
+                config_kw.pop("frequency_penalty", None)
+                config_kw.pop("presence_penalty", None)
+                return _call(config_kw)
+            raise
+
+
+class _GeminiChat:
+    __slots__ = ("completions",)
+
+    def __init__(self, completions: _GeminiChatCompletions) -> None:
+        self.completions = completions
+
+
+class _GeminiClient:
+    """Drop-in replacement for ``openai.OpenAI`` that talks to Google Gemini."""
+
+    def __init__(self, api_key: str) -> None:
+        self.chat = _GeminiChat(_GeminiChatCompletions(api_key))
+
+
 # -- Factory ---------------------------------------------------------------
 
 
@@ -344,13 +508,20 @@ def build_client(
     api_key: str | None = None,
     base_url: str | None = None,
     think: bool | None = None,
+    gemini_api_key: str | None = None,
 ) -> Any:
     """Return an LLM client appropriate for the given backend.
 
     For Ollama endpoints, returns a lightweight native client that honours
-    the ``think`` parameter.  For everything else, returns a standard
-    ``openai.OpenAI`` instance (wrapped for stream-callback support).
+    the ``think`` parameter.  When *gemini_api_key* is provided, returns a
+    Gemini client using the Google GenAI SDK.  For everything else, returns
+    a standard ``openai.OpenAI`` instance (wrapped for stream-callback
+    support).
     """
+    if gemini_api_key:
+        log.debug("Using Gemini client (google-genai)")
+        return _GeminiClient(gemini_api_key)
+
     if _is_ollama_url(base_url):
         ollama_base = _ollama_base(base_url)
         log.debug("Using native Ollama client → %s", ollama_base)
