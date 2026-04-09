@@ -62,6 +62,7 @@ def handler(args: argparse.Namespace) -> None:
         llm_model=args.llm_model,
         base_dir=args.base_dir,
         llm_think=args.llm_think,
+        gemini_api_key=getattr(args, "gemini_api_key", None),
     )
     proj = dubber.dub(
         source=args.source,

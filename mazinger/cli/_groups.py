@@ -151,8 +151,13 @@ def add_openai(p: argparse.ArgumentParser) -> None:
     p.add_argument("--openai-base-url", default=os.environ.get("OPENAI_BASE_URL"), help="Base URL for OpenAI-compatible API.")
 
 
+def add_gemini(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--gemini-api-key", default=os.environ.get("GEMINI_API_KEY"), help="Google Gemini API key.")
+
+
 def add_llm(p: argparse.ArgumentParser) -> None:
     add_openai(p)
+    add_gemini(p)
     p.add_argument("--llm-model", default=os.environ.get("OPENAI_MODEL", "gpt-4.1"), help="LLM model for translation/analysis.")
     p.add_argument(
         "--llm-think", action=argparse.BooleanOptionalAction, default=None,
@@ -302,6 +307,7 @@ def make_llm_client(args: argparse.Namespace):
         api_key=getattr(args, "openai_api_key", None),
         base_url=getattr(args, "openai_base_url", None),
         think=getattr(args, "llm_think", None),
+        gemini_api_key=getattr(args, "gemini_api_key", None),
     )
 
 

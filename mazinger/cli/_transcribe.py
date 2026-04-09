@@ -6,7 +6,7 @@ import argparse
 
 from mazinger.cli._groups import (
     DEFAULT_MLX_WHISPER_MODEL,
-    add_common, add_openai, add_source, resolve_project,
+    add_common, add_gemini, add_openai, add_source, resolve_project,
 )
 
 
@@ -44,6 +44,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
                         "(requires --asr-review).")
     p.add_argument("--llm-model", default="gpt-4.1", help="LLM model for refinement.")
     add_openai(p)
+    add_gemini(p)
     add_common(p)
 
 
@@ -96,6 +97,7 @@ def handler(args: argparse.Namespace) -> None:
         client = build_client(
             api_key=args.openai_api_key,
             base_url=args.openai_base_url,
+            gemini_api_key=getattr(args, "gemini_api_key", None),
         )
 
         description = describe_content(

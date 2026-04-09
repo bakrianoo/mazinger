@@ -37,6 +37,10 @@ transcribe-whisperx = [
     "scipy>=1.14",          # ABI-compatible with numpy 2.x (Colab Fix)
     "scikit-learn>=1.5",    # Pulled by transformers; must match scipy
 ]
+# Google Gemini LLM provider (alternative to OpenAI for translation/analysis)
+llm-gemini = [
+    "google-genai>=1.0",
+]
 # Alias for convenience (points to faster-whisper)
 transcribe = [
     "mazinger[transcribe-faster]",

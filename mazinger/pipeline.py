@@ -38,12 +38,14 @@ class MazingerDubber:
         llm_model: str | None = None,
         base_dir: str = "./mazinger_output",
         llm_think: bool | None = None,
+        gemini_api_key: str | None = None,
     ) -> None:
         self.llm_model = llm_model or os.environ.get("OPENAI_MODEL") or "gpt-4.1"
         self.base_dir = base_dir
         self._api_key = openai_api_key or os.environ.get("OPENAI_API_KEY")
         self._base_url = openai_base_url or os.environ.get("OPENAI_BASE_URL")
         self._llm_think = llm_think
+        self._gemini_api_key = gemini_api_key or os.environ.get("GEMINI_API_KEY")
 
     # ------------------------------------------------------------------
     #  Internal helpers
@@ -56,6 +58,7 @@ class MazingerDubber:
             api_key=self._api_key,
             base_url=self._base_url,
             think=self._llm_think,
+            gemini_api_key=self._gemini_api_key,
         )
 
     # ------------------------------------------------------------------
