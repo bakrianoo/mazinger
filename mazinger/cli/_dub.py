@@ -78,6 +78,7 @@ def handler(args: argparse.Namespace) -> None:
         tts_language=args.tts_language,
         tts_engine=args.tts_engine,
         mlx_model=args.mlx_tts_model,
+        deepgram_api_key=getattr(args, "deepgram_api_key", None),
         source_language=args.source_language,
         target_language=args.target_language,
         chatterbox_model=args.chatterbox_model,

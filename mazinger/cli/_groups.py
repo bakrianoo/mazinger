@@ -119,6 +119,7 @@ def ensure_transcription(proj, args: argparse.Namespace) -> None:
         device=getattr(args, "device", "cuda"),
         openai_api_key=getattr(args, "openai_api_key", None),
         openai_base_url=getattr(args, "openai_base_url", None),
+        deepgram_api_key=getattr(args, "deepgram_api_key", None),
     )
 
 
@@ -149,6 +150,10 @@ def add_common(p: argparse.ArgumentParser) -> None:
 def add_openai(p: argparse.ArgumentParser) -> None:
     p.add_argument("--openai-api-key", default=os.environ.get("OPENAI_API_KEY"), help="OpenAI API key.")
     p.add_argument("--openai-base-url", default=os.environ.get("OPENAI_BASE_URL"), help="Base URL for OpenAI-compatible API.")
+
+
+def add_deepgram(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--deepgram-api-key", default=os.environ.get("DEEPGRAM_API_KEY"), help="Deepgram API key.")
 
 
 def add_llm(p: argparse.ArgumentParser) -> None:
@@ -221,10 +226,12 @@ def add_segment_mode(p: argparse.ArgumentParser) -> None:
 
 def add_transcription(p: argparse.ArgumentParser) -> None:
     p.add_argument(
-        "--transcribe-method", default="faster-whisper", choices=["openai", "faster-whisper", "whisperx", "mlx-whisper"],
-        help="Transcription backend: 'faster-whisper' (default), 'openai', 'whisperx', or 'mlx-whisper' (Apple Silicon).",
+        "--transcribe-method", default="faster-whisper",
+        choices=["openai", "faster-whisper", "whisperx", "mlx-whisper", "deepgram"],
+        help="Transcription backend: 'faster-whisper' (default), 'openai', 'whisperx', "
+             "'mlx-whisper' (Apple Silicon), or 'deepgram' (cloud).",
     )
-    p.add_argument("--whisper-model", default=None, help="Whisper model name (for openai/faster-whisper/whisperx).")
+    p.add_argument("--whisper-model", default=None, help="Whisper/Deepgram model name.")
     p.add_argument("--mlx-whisper-model", default=DEFAULT_MLX_WHISPER_MODEL,
                    help=f"MLX Whisper model name (default: {DEFAULT_MLX_WHISPER_MODEL}).")
     p.add_argument(
@@ -234,6 +241,7 @@ def add_transcription(p: argparse.ArgumentParser) -> None:
         help="Beam size for decoding when supported by the selected backend (for example, faster-whisper). "
              "Leave unset for mlx-whisper.",
     )
+    add_deepgram(p)
 
 
 def add_cookies(p: argparse.ArgumentParser) -> None:

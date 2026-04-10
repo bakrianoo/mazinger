@@ -80,6 +80,7 @@ class MazingerDubber:
         tts_language: str | None = None,
         tts_engine: str = "qwen",
         mlx_model: str = DEFAULT_MLX_MODEL,
+        deepgram_api_key: str | None = None,
         source_language: str = "auto",
         target_language: str = "English",
         chatterbox_model: str = "ResembleAI/chatterbox",
@@ -129,8 +130,11 @@ class MazingerDubber:
                             or filename when ``None``.
             device:         Accelerator device (``cuda`` or ``cpu``).
             transcribe_method: Transcription backend: ``faster-whisper`` (default,
-                            local GPU), ``openai`` (cloud API), or ``whisperx``
-                            (requires [transcribe-whisperx] extra).
+                            local GPU), ``openai`` (cloud API), ``whisperx``
+                            (requires [transcribe-whisperx] extra), or
+                            ``deepgram`` (cloud, requires DEEPGRAM_API_KEY).
+            deepgram_api_key: Deepgram API key (Deepgram method only). Falls
+                            back to ``DEEPGRAM_API_KEY`` environment variable.
             whisper_model:  Whisper model name. Defaults to ``whisper-1`` for OpenAI,
                             ``large-v3`` for faster-whisper/WhisperX.
             tts_model_name: HuggingFace model identifier for TTS.
@@ -289,6 +293,7 @@ class MazingerDubber:
                 beam_size=None if transcribe_method == "mlx-whisper" else beam_size,
                 openai_api_key=self._api_key,
                 openai_base_url=self._base_url,
+                deepgram_api_key=deepgram_api_key,
                 skip_resegment=not use_resegmented,
                 initial_prompt=_initial_prompt,
             )

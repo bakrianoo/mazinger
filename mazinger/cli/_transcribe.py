@@ -6,7 +6,7 @@ import argparse
 
 from mazinger.cli._groups import (
     DEFAULT_MLX_WHISPER_MODEL,
-    add_common, add_openai, add_source, resolve_project,
+    add_common, add_deepgram, add_openai, add_source, resolve_project,
 )
 
 
@@ -16,10 +16,12 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     p.add_argument("--audio", default=None, help="Path to audio file (overrides source).")
     p.add_argument("-o", "--output", default=None,
                    help="Output SRT path (default: project transcription/source.srt).")
-    p.add_argument("--method", default="faster-whisper", choices=["openai", "faster-whisper", "whisperx", "mlx-whisper"],
+    p.add_argument("--method", default="faster-whisper",
+                   choices=["openai", "faster-whisper", "whisperx", "mlx-whisper", "deepgram"],
                    help="Transcription backend.")
     p.add_argument("--model", default=None,
-                   help="Model name. Defaults to 'whisper-1' for OpenAI, 'large-v3' for local.")
+                   help="Model name. Defaults to 'whisper-1' for OpenAI, "
+                        "'large-v3' for local, 'nova-3' for Deepgram.")
     p.add_argument("--mlx-whisper-model", default=DEFAULT_MLX_WHISPER_MODEL,
                    help=f"MLX Whisper model name (default: {DEFAULT_MLX_WHISPER_MODEL}).")
     p.add_argument("--device", default="auto", help="Device: auto (default), cuda, or cpu.")
@@ -44,6 +46,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
                         "(requires --asr-review).")
     p.add_argument("--llm-model", default="gpt-4.1", help="LLM model for refinement.")
     add_openai(p)
+    add_deepgram(p)
     add_common(p)
 
 
@@ -80,6 +83,7 @@ def handler(args: argparse.Namespace) -> None:
         llm_model=args.llm_model,
         openai_api_key=args.openai_api_key,
         openai_base_url=args.openai_base_url,
+        deepgram_api_key=args.deepgram_api_key,
         initial_prompt=args.initial_prompt,
         condition_on_previous_text=not args.no_condition_on_previous_text,
     )

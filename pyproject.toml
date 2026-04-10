@@ -37,6 +37,11 @@ transcribe-whisperx = [
     "scipy>=1.14",          # ABI-compatible with numpy 2.x (Colab Fix)
     "scikit-learn>=1.5",    # Pulled by transformers; must match scipy
 ]
+# Cloud transcription with Deepgram Nova API
+# Compatible with ALL TTS engines (no local GPU or transformers dependency).
+transcribe-deepgram = [
+    "deepgram-sdk>=6.0",
+]
 # Alias for convenience (points to faster-whisper)
 transcribe = [
     "mazinger[transcribe-faster]",
