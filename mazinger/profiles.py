@@ -689,15 +689,8 @@ def fetch_profile(profile_name: str, cache_dir: str | None = None) -> tuple[str,
     in_custom = _profile_exists(custom_url) if custom_url else False
 
     if in_default and in_custom:
-        if sys.stdin.isatty():
-            print(f"Profile '{profile_name}' found in both repos:")
-            print(f"  [1] Default: {default_url}")
-            print(f"  [2] Custom: {custom_url}")
-            choice = input("Select repo (1/2): ").strip()
-            base_url = custom_url if choice == "2" else default_url
-        else:
-            base_url = custom_url
-            log.info("Profile found in both repos, using custom repo")
+        base_url = custom_url
+        log.info("Profile found in both repos, using custom repo")
     elif in_custom:
         base_url = custom_url
     elif in_default:
