@@ -26,7 +26,7 @@ Mazinger chains ten stages into a single pipeline:
 5. **Review** — optionally refine ASR output: fix typos, reshape punctuation, and convert technical terms to English
 6. **Translate** — translate the SRT into another language with duration-aware word budgets
 7. **Re-segment** — merge fragments and split oversized subtitles for readability
-8. **Speak** — synthesize voice-cloned speech for every subtitle entry (Qwen3-TTS, Chatterbox, or MLX), with 16 pre-defined voice themes or your own voice sample
+8. **Speak** — synthesize voice-cloned speech for every subtitle entry (Qwen3-TTS, Chatterbox, MLX, or Pocket TTS), with 16 pre-defined voice themes or your own voice sample
 9. **Assemble** — place each audio segment on the original timeline with optional tempo adjustment, loudness matching, and background audio mixing
 10. **Subtitle** — burn styled subtitles into the video and/or mux the new audio track
 
@@ -59,6 +59,7 @@ pip install "mazinger[transcribe-whisperx]"    # WhisperX (optional, word-level 
 pip install "mazinger[tts]"                    # Qwen3-TTS (voice sample + transcript)
 pip install "mazinger[tts-chatterbox]"         # Chatterbox (voice sample only, emotion control)
 pip install "mazinger[tts-mlx]"                # MLX Qwen3-TTS (Apple Silicon)
+pip install "mazinger[tts-pocket]"             # Pocket TTS (Kyutai, CPU-only, English only)
 
 # MLX transcription (Apple Silicon)
 pip install "mazinger[transcribe-mlx]"         # MLX Whisper (Apple Silicon)
@@ -140,6 +141,32 @@ mazinger dub "https://youtube.com/watch?v=VIDEO_ID" \
     --subtitle-google-font "Noto Sans Arabic" \
     --subtitle-font-size 24
 ```
+
+### Dub without a GPU (Pocket TTS, CPU-only)
+
+[Pocket TTS](https://github.com/kyutai-labs/pocket-tts) (Kyutai, 100M params) runs entirely
+on CPU with no GPU required — ideal for low-resource machines, CI servers, or quick
+drafts. It ships with 8 predefined voices (no files or HF account needed) and also
+supports zero-shot voice cloning from a short reference clip. **English only**.
+
+```bash
+pip install "mazinger[tts-pocket]"
+
+# With a predefined voice — no voice sample needed
+mazinger dub "https://youtube.com/watch?v=VIDEO_ID" \
+    --tts-engine pocket --pocket-voice alba \
+    --target-language English
+
+# With voice cloning from your own audio (requires HF gated access +
+# `hf auth login` — see https://huggingface.co/kyutai/pocket-tts)
+mazinger dub "https://youtube.com/watch?v=VIDEO_ID" \
+    --tts-engine pocket \
+    --voice-sample speaker.wav \
+    --target-language English
+```
+
+Predefined voices: `alba` · `marius` · `javert` · `jean` · `fantine` · `cosette` · `eponine` · `azelma`.
+Long reference clips are automatically trimmed to 30 s to prevent hallucination.
 
 ### Run a single stage
 

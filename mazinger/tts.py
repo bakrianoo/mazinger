@@ -349,6 +349,10 @@ POCKET_VOICES = ("alba", "marius", "javert", "jean", "fantine", "cosette", "epon
 
 _POCKET_DEFAULT_VOICE = "alba"
 
+# Pocket TTS hallucinates (generates past max length without EOS) when the
+# reference audio is longer than ~30s.  Auto-trim anything beyond this.
+_POCKET_MAX_REF_SECONDS = 30
+
 
 def _load_pocket_model() -> Any:
     """Load a Pocket TTS model and return it.
@@ -403,23 +407,22 @@ def _create_pocket_voice_state(model: Any, ref_audio: str | None) -> Any:
 
         # 3. Zero-shot voice cloning — trim long references to avoid
         #    hallucination (Pocket TTS works best with ≤30s clips).
-        _MAX_REF_SECONDS = 30
         clone_path = ref_audio
         try:
             dur = sf.info(ref_audio).duration
-            if dur > _MAX_REF_SECONDS:
+            if dur > _POCKET_MAX_REF_SECONDS:
                 import subprocess
                 trimmed = os.path.splitext(ref_audio)[0] + "_pocket.wav"
                 if not os.path.isfile(trimmed):
                     subprocess.run(
                         ["ffmpeg", "-y", "-i", ref_audio,
-                         "-t", str(_MAX_REF_SECONDS), "-ar", "24000",
+                         "-t", str(_POCKET_MAX_REF_SECONDS), "-ar", "24000",
                          "-ac", "1", trimmed],
                         check=True, capture_output=True,
                     )
                 log.info(
                     "Trimmed reference audio from %.0fs to %ds for Pocket TTS",
-                    dur, _MAX_REF_SECONDS,
+                    dur, _POCKET_MAX_REF_SECONDS,
                 )
                 clone_path = trimmed
         except Exception:
@@ -460,6 +463,10 @@ class _PocketTTSWrapper(TTSWrapper):
         self.voice_state = voice_state
 
     def synthesize(self, text: str, language: str = "English") -> tuple[np.ndarray, int]:
+        if not text or not text.strip():
+            # Pocket TTS's tokenizer raises on empty input; return silence
+            # so the pipeline can continue and let assemble.py fill the gap.
+            return np.zeros(0, dtype=np.float32), self.model.sample_rate
         if language != "English":
             log.warning(
                 "Pocket TTS currently supports English only; "

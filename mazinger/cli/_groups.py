@@ -185,7 +185,8 @@ def add_tts_engine(p: argparse.ArgumentParser) -> None:
                    help="Target TTS language (defaults to --target-language).")
     p.add_argument(
         "--tts-engine", default="qwen", choices=["qwen", "chatterbox", "mlx", "pocket"],
-        help="TTS engine: 'qwen' (Qwen3-TTS), 'chatterbox' (ResembleAI Chatterbox), or 'mlx' (Apple Silicon).",
+        help="TTS engine: 'qwen' (Qwen3-TTS), 'chatterbox' (ResembleAI Chatterbox), "
+             "'mlx' (Apple Silicon), or 'pocket' (Pocket TTS, CPU-only, English only).",
     )
     p.add_argument("--mlx-tts-model", default=DEFAULT_MLX_MODEL,
                    help="MLX Qwen3-TTS model name (default: mlx-community/Qwen3-TTS-12Hz-0.6B-Base-bf16).")

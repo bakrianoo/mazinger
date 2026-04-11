@@ -27,7 +27,11 @@ Both require a CUDA GPU (or can fall back to CPU at reduced speed).
 pip install "mazinger[tts]"                    # Qwen3-TTS — needs a voice sample + transcript
 pip install "mazinger[tts-chatterbox]"         # Chatterbox — needs only a voice sample, has emotion control
 pip install "mazinger[tts-mlx]"                # MLX Qwen3-TTS — Apple Silicon (M1/M2/M3/M4/M5)
+pip install "mazinger[tts-pocket]"             # Pocket TTS — CPU-only, English only, 8 predefined voices
 ```
+
+Pocket TTS is the only TTS backend that runs without a GPU. It's useful for CI,
+low-resource machines, or when you just want to prototype without configuring CUDA.
 
 ### MLX Transcription (Apple Silicon)
 
@@ -52,6 +56,7 @@ Qwen, Chatterbox, and MLX pull different versions of `transformers` and cannot c
 | `tts` (Qwen) | ≥ 4.48 | `transcribe-faster`, `transcribe-whisperx` |
 | `tts-chatterbox` | == 4.46.3 | `transcribe-faster`, OpenAI transcription |
 | `tts-mlx` | (mlx-audio) | `transcribe-mlx` |
+| `tts-pocket` | (not required) | any transcription backend (no GPU, CPU-only) |
 | `all-mlx` | (mlx-audio + mlx-whisper) | Apple Silicon only |
 
 WhisperX requires `transformers>=4.48`, so it conflicts with Chatterbox. When using Chatterbox, choose `transcribe-faster` or the cloud-based OpenAI transcription.
@@ -72,10 +77,12 @@ WhisperX requires `transformers>=4.48`, so it conflicts with Chatterbox. When us
 | Speak (Qwen) | `mazinger speak` | no | `tts` + CUDA |
 | Speak (Chatterbox) | `mazinger speak --tts-engine chatterbox` | no | `tts-chatterbox` + CUDA |
 | Speak (MLX) | `mazinger speak --tts-engine mlx` | no | `tts-mlx` + Apple Silicon |
+| Speak (Pocket) | `mazinger speak --tts-engine pocket` | no | `tts-pocket` (CPU-only, English only) |
 | Subtitle embed | `mazinger subtitle` | yes | ffmpeg only |
 | Full dub (Qwen) | `mazinger dub` | no | `all-qwen` + CUDA |
 | Full dub (Chatterbox) | `mazinger dub --tts-engine chatterbox` | no | `all-chatterbox` + CUDA |
 | Full dub (MLX) | `mazinger dub --tts-engine mlx` | no | `all-mlx` + Apple Silicon |
+| Full dub (Pocket) | `mazinger dub --tts-engine pocket` | no | `tts-pocket` (CPU-only, English only) |
 
 ## System Dependencies
 
