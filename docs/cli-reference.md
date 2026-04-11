@@ -37,10 +37,11 @@ mazinger dub <source> [options]
 | `--voice-theme` | — | Pre-defined voice theme (e.g. `narrator-m`, `warm-f`). See `mazinger profile list` |
 | `--voice-sample` | — | Path to reference voice audio file |
 | `--voice-script` | — | Path to transcript of the voice sample (or inline text) |
-| `--transcribe-method` | `faster-whisper` | `openai`, `faster-whisper`, `whisperx`, or `mlx-whisper` |
-| `--whisper-model` | varies by method | Whisper model name |
+| `--transcribe-method` | `faster-whisper` | `openai`, `faster-whisper`, `whisperx`, `mlx-whisper`, or `deepgram` |
+| `--whisper-model` | varies by method | Whisper/Deepgram model name |
 | `--mlx-whisper-model` | `mlx-community/whisper-large-v3-turbo` | MLX Whisper model name |
 | `--beam-size` | `5` | Beam size for decoding (faster-whisper/whisperx) |
+| `--deepgram-api-key` | `$DEEPGRAM_API_KEY` | Deepgram API key (required for `--transcribe-method deepgram`) |
 | `--device` | `auto` | `auto`, `cuda`, or `cpu` |
 | `--source-language` | `auto` | Source language for translation (or `auto` to detect) |
 | `--target-language` | `English` | Target language for translation |
@@ -185,8 +186,8 @@ If `source` is provided, the video is downloaded first and its audio is transcri
 |------|---------|-------------|
 | `--audio` | — | Path to audio file (overrides source) |
 | `-o`, `--output` | — | Output SRT path |
-| `--method` | `faster-whisper` | `openai`, `faster-whisper`, `whisperx`, or `mlx-whisper` |
-| `--model` | varies | Whisper model name (`whisper-1` for OpenAI, `large-v3` for local) |
+| `--method` | `faster-whisper` | `openai`, `faster-whisper`, `whisperx`, `mlx-whisper`, or `deepgram` |
+| `--model` | varies | Model name (`whisper-1` for OpenAI, `large-v3` for local, `nova-3` for Deepgram) |
 | `--device` | `auto` | `auto`, `cuda`, `cpu` |
 | `--batch-size` | `16` | Batch size for local transcription |
 | `--compute-type` | `float16` | Weight precision: `float16`, `int8`, `int8_float16` |
@@ -203,12 +204,17 @@ If `source` is provided, the video is downloaded first and its audio is transcri
 | `--llm-model` | `gpt-4.1` | LLM model for refinement |
 | `--llm-think` / `--no-llm-think` | — | Enable/disable LLM thinking mode |
 | `--openai-api-key` | `$OPENAI_API_KEY` | OpenAI API key (for cloud method) |
+| `--deepgram-api-key` | `$DEEPGRAM_API_KEY` | Deepgram API key (for `--method deepgram`) |
 
 **Examples:**
 
 ```bash
-# Cloud transcription
-mazinger transcribe --audio recording.mp3 -o subs.srt
+# Cloud transcription (OpenAI)
+mazinger transcribe --audio recording.mp3 -o subs.srt --method openai
+
+# Cloud transcription (Deepgram Nova 3 — free $200 credit, no card)
+mazinger transcribe --audio recording.mp3 -o subs.srt \
+    --method deepgram --language ar
 
 # Local with faster-whisper on GPU
 mazinger transcribe --audio recording.mp3 -o subs.srt \

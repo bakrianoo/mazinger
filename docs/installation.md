@@ -21,6 +21,15 @@ pip install "mazinger[transcribe-whisperx]"    # WhisperX — best word-level al
 
 Both require a CUDA GPU (or can fall back to CPU at reduced speed).
 
+### Cloud Transcription (no GPU required)
+
+```bash
+pip install "mazinger[transcribe-deepgram]"    # Deepgram Nova 3 — 47+ languages, free $200 credit
+```
+
+Deepgram offers strong multilingual quality (including Arabic) and gives new accounts $200
+in free credits without a credit card. Set `DEEPGRAM_API_KEY` and use `--method deepgram`.
+
 ### Voice Synthesis (TTS)
 
 ```bash
@@ -61,7 +70,8 @@ WhisperX requires `transformers>=4.48`, so it conflicts with Chatterbox. When us
 | Task | Command | Core install | Extra needed |
 |------|---------|:------------:|--------------|
 | Download | `mazinger download` | yes | — |
-| Transcribe (cloud) | `mazinger transcribe` | yes | — (OpenAI API) |
+| Transcribe (cloud, OpenAI) | `mazinger transcribe --method openai` | yes | — (OpenAI API) |
+| Transcribe (cloud, Deepgram) | `mazinger transcribe --method deepgram` | no | `transcribe-deepgram` + Deepgram API |
 | Transcribe (local) | `mazinger transcribe --method faster-whisper` | no | `transcribe-faster` + CUDA |
 | Transcribe (local) | `mazinger transcribe --method whisperx` | no | `transcribe-whisperx` + CUDA |
 | Transcribe (MLX) | `mazinger transcribe --method mlx-whisper` | no | `transcribe-mlx` + Apple Silicon |

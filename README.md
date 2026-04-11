@@ -20,7 +20,7 @@
 Mazinger chains ten stages into a single pipeline:
 
 1. **Download** — fetch a video from a URL or ingest a local file, extract the audio track
-2. **Transcribe** — convert speech to SRT subtitles (OpenAI Whisper API, faster-whisper, WhisperX, or MLX Whisper)
+2. **Transcribe** — convert speech to SRT subtitles (OpenAI Whisper API, faster-whisper, WhisperX, MLX Whisper, or Deepgram Nova 3)
 3. **Thumbnails** — use an LLM to pick key frames from the video for visual context
 4. **Describe** — analyze the transcript and thumbnails to produce a structured summary (title, key points, keywords)
 5. **Review** — optionally refine ASR output: fix typos, reshape punctuation, and convert technical terms to English
@@ -54,6 +54,9 @@ Add local transcription or TTS as optional extras:
 # Local transcription
 pip install "mazinger[transcribe-faster]"      # faster-whisper (default, recommended)
 pip install "mazinger[transcribe-whisperx]"    # WhisperX (optional, word-level alignment)
+
+# Cloud transcription (no GPU needed)
+pip install "mazinger[transcribe-deepgram]"    # Deepgram Nova 3 (cloud, free $200 credit)
 
 # Voice synthesis
 pip install "mazinger[tts]"                    # Qwen3-TTS (voice sample + transcript)
@@ -151,6 +154,26 @@ mazinger slice      "https://youtube.com/watch?v=VIDEO_ID" --start 00:01:00 --en
 mazinger transcribe ./output/projects/my-video/source/audio.mp3 -o subs.srt
 mazinger translate  --srt subs.srt --target-language French -o translated.srt
 mazinger subtitle   video.mp4 --srt translated.srt -o output.mp4
+```
+
+### Cloud transcription with Deepgram (no GPU required)
+
+Deepgram Nova 3 offers strong multilingual quality (including Arabic) and gives you **$200
+in free credits on sign-up with no credit card required** — enough to transcribe many hours
+of audio for free. Get your key at [deepgram.com](https://deepgram.com), then:
+
+```bash
+export DEEPGRAM_API_KEY=your_key_here
+
+# Standalone transcription
+mazinger transcribe "https://youtube.com/watch?v=VIDEO_ID" \
+    --method deepgram --language ar -o subs.srt
+
+# Full dubbing pipeline with Deepgram for STT
+mazinger dub "https://youtube.com/watch?v=VIDEO_ID" \
+    --transcribe-method deepgram \
+    --voice-theme narrator-m \
+    --target-language English
 ```
 
 ### Python API

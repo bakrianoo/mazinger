@@ -155,7 +155,11 @@ mazinger dub "https://youtube.com/watch?v=VIDEO_ID" \
 
 ```bash
 # Cloud (OpenAI Whisper API)
-mazinger transcribe ./output/projects/my-video/source/audio.mp3 -o subs.srt
+mazinger transcribe ./output/projects/my-video/source/audio.mp3 -o subs.srt --method openai
+
+# Cloud (Deepgram Nova 3 — free $200 credit, no card required)
+export DEEPGRAM_API_KEY=your_key
+mazinger transcribe audio.mp3 -o subs.srt --method deepgram --language ar
 
 # Local with faster-whisper (default)
 mazinger transcribe audio.mp3 -o subs.srt --method faster-whisper --device cuda
