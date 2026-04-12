@@ -40,7 +40,7 @@ mazinger dub <source> [options]
 | `--transcribe-method` | `faster-whisper` | `openai`, `faster-whisper`, `whisperx`, `mlx-whisper`, or `deepgram` |
 | `--whisper-model` | varies by method | Whisper/Deepgram model name |
 | `--mlx-whisper-model` | `mlx-community/whisper-large-v3-turbo` | MLX Whisper model name |
-| `--beam-size` | `5` | Beam size for decoding (faster-whisper/whisperx) |
+| `--beam-size` | — | Beam size for decoding (faster-whisper/whisperx) |
 | `--deepgram-api-key` | `$DEEPGRAM_API_KEY` | Deepgram API key (required for `--transcribe-method deepgram`) |
 | `--device` | `auto` | `auto`, `cuda`, or `cpu` |
 | `--source-language` | `auto` | Source language for translation (or `auto` to detect) |
