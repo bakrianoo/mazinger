@@ -1,4 +1,4 @@
-"""Voice-cloned text-to-speech synthesis using Qwen3-TTS, Chatterbox, or MLX."""
+"""Voice-cloned text-to-speech synthesis using Qwen3-TTS, Chatterbox, MLX, or Pocket TTS."""
 
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ def _remove_from_cache(obj: Any) -> None:
 #  TTS Engine Type
 # ═══════════════════════════════════════════════════════════════════════════════
 
-TTSEngine = Literal["qwen", "chatterbox", "mlx"]
+TTSEngine = Literal["qwen", "chatterbox", "mlx", "pocket"]
 DEFAULT_MLX_MODEL = "mlx-community/Qwen3-TTS-12Hz-0.6B-Base-bf16"
 
 SUPPORTED_LANGUAGES = (
@@ -342,6 +342,146 @@ class _MLXTTSWrapper(TTSWrapper):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#  Pocket TTS Backend (CPU-only, lightweight)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+POCKET_VOICES = ("alba", "marius", "javert", "jean", "fantine", "cosette", "eponine", "azelma")
+
+_POCKET_DEFAULT_VOICE = "alba"
+
+# Pocket TTS hallucinates (generates past max length without EOS) when the
+# reference audio is longer than ~30s.  Auto-trim anything beyond this.
+_POCKET_MAX_REF_SECONDS = 30
+
+
+def _load_pocket_model() -> Any:
+    """Load a Pocket TTS model and return it.
+
+    Pocket TTS is a lightweight 100M-parameter model that runs entirely
+    on CPU with no GPU required.  It supports zero-shot voice cloning
+    from a reference audio file (requires gated model access on HuggingFace)
+    or predefined voices.  Currently English only.
+    """
+    try:
+        from pocket_tts import TTSModel
+    except ImportError as e:
+        raise ImportError(
+            "pocket-tts not installed. Install with: pip install 'mazinger[tts-pocket]'\n"
+            "Or use --tts-engine qwen or --tts-engine chatterbox instead."
+        ) from e
+
+    model = TTSModel.load_model()
+    has_cloning = getattr(model, "has_voice_cloning", False)
+    log.info(
+        "Loaded Pocket TTS model (CPU, 100M params, voice_cloning=%s)",
+        has_cloning,
+    )
+    return model
+
+
+def _create_pocket_voice_state(model: Any, ref_audio: str | None) -> Any:
+    """Build a reusable voice state for Pocket TTS.
+
+    Tries the following in order:
+
+    1. If *ref_audio* matches a predefined voice name, use it directly.
+    2. If a pre-exported ``.safetensors`` file exists alongside the
+       reference audio, load it for faster initialisation.
+    3. If the model supports voice cloning, clone from *ref_audio*
+       (auto-trims references longer than 30s to prevent hallucination).
+    4. Otherwise fall back to the default predefined voice.
+    """
+    # 1. Check if ref_audio is a predefined voice name
+    if ref_audio and ref_audio in POCKET_VOICES:
+        log.info("Using predefined Pocket TTS voice: %s", ref_audio)
+        return model.get_state_for_audio_prompt(ref_audio)
+
+    has_cloning = getattr(model, "has_voice_cloning", False)
+
+    if ref_audio and has_cloning:
+        # 2. Check for pre-exported voice embedding
+        safetensors_path = os.path.splitext(ref_audio)[0] + ".safetensors"
+        if os.path.isfile(safetensors_path):
+            log.info("Loading exported Pocket TTS voice from %s", safetensors_path)
+            return model.get_state_for_audio_prompt(safetensors_path)
+
+        # 3. Zero-shot voice cloning — trim long references to avoid
+        #    hallucination (Pocket TTS works best with ≤30s clips).
+        clone_path = ref_audio
+        try:
+            dur = sf.info(ref_audio).duration
+            if dur > _POCKET_MAX_REF_SECONDS:
+                import subprocess
+                trimmed = os.path.splitext(ref_audio)[0] + "_pocket.wav"
+                if not os.path.isfile(trimmed):
+                    subprocess.run(
+                        ["ffmpeg", "-y", "-i", ref_audio,
+                         "-t", str(_POCKET_MAX_REF_SECONDS), "-ar", "24000",
+                         "-ac", "1", trimmed],
+                        check=True, capture_output=True,
+                    )
+                log.info(
+                    "Trimmed reference audio from %.0fs to %ds for Pocket TTS",
+                    dur, _POCKET_MAX_REF_SECONDS,
+                )
+                clone_path = trimmed
+        except Exception:
+            log.debug("Could not check/trim reference audio", exc_info=True)
+
+        voice_state = model.get_state_for_audio_prompt(clone_path)
+        log.info("Pocket TTS voice cloned from %s", clone_path)
+        return voice_state
+
+    # 4. Fall back to predefined voice
+    if ref_audio and not has_cloning:
+        log.warning(
+            "Pocket TTS voice cloning not available (accept terms at "
+            "https://huggingface.co/kyutai/pocket-tts and run 'hf auth login'). "
+            "Using predefined voice '%s' instead.",
+            _POCKET_DEFAULT_VOICE,
+        )
+    return model.get_state_for_audio_prompt(_POCKET_DEFAULT_VOICE)
+
+
+def _synthesize_pocket(
+    model: Any,
+    voice_state: Any,
+    text: str,
+) -> tuple[np.ndarray, int]:
+    """Generate audio using Pocket TTS. Returns (audio_array, sample_rate)."""
+    audio = model.generate_audio(voice_state, text)
+    audio_data = audio.squeeze().numpy()
+    return audio_data, model.sample_rate
+
+
+class _PocketTTSWrapper(TTSWrapper):
+
+    engine = "pocket"
+
+    def __init__(self, model: Any, voice_state: Any):
+        self.model = model
+        self.voice_state = voice_state
+
+    def synthesize(self, text: str, language: str = "English") -> tuple[np.ndarray, int]:
+        if not text or not text.strip():
+            # Pocket TTS's tokenizer raises on empty input; return silence
+            # so the pipeline can continue and let assemble.py fill the gap.
+            return np.zeros(0, dtype=np.float32), self.model.sample_rate
+        if language != "English":
+            log.warning(
+                "Pocket TTS currently supports English only; "
+                "received language=%r — output may be degraded", language,
+            )
+        return _synthesize_pocket(self.model, self.voice_state, text)
+
+    def unload(self) -> None:
+        _remove_from_cache(self.model)
+        del self.voice_state, self.model
+        gc.collect()
+        log.info("Pocket TTS model unloaded.")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #  Public API
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -382,6 +522,8 @@ def load_model(
         model = _load_chatterbox_model(device, chatterbox_model)
     elif engine == "mlx":
         model = _load_mlx_model(mlx_model)
+    elif engine == "pocket":
+        model = _load_pocket_model()
     else:
         raise ValueError(f"Unknown TTS engine: {engine!r}")
 
@@ -424,6 +566,9 @@ def create_voice_prompt(
     elif engine == "mlx":
         log.info("MLX Qwen3-TTS voice clone configured from %s", ref_audio)
         return _MLXTTSWrapper(model, ref_audio, ref_text)
+    elif engine == "pocket":
+        voice_state = _create_pocket_voice_state(model, ref_audio)
+        return _PocketTTSWrapper(model, voice_state)
     else:
         raise ValueError(f"Unknown TTS engine: {engine!r}")
 

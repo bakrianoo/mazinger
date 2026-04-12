@@ -306,6 +306,29 @@ For transcription with MLX Whisper:
 mazinger transcribe audio.mp3 -o subs.srt --method mlx-whisper
 ```
 
+## Use Pocket TTS (CPU-only, no GPU needed)
+
+[Pocket TTS](https://github.com/kyutai-labs/pocket-tts) (Kyutai, 100M params) runs entirely
+on CPU. Install with `pip install "mazinger[tts-pocket]"`, then use `--tts-engine pocket`.
+Currently **English only**.
+
+```bash
+# With a predefined voice — no voice sample or HF account needed
+mazinger dub "https://youtube.com/watch?v=VIDEO_ID" \
+    --tts-engine pocket --pocket-voice alba \
+    --target-language English
+
+# With voice cloning from your own audio (requires accepting the gated model
+# terms at https://huggingface.co/kyutai/pocket-tts and `hf auth login`)
+mazinger speak --srt translated.srt --original-audio audio.mp3 \
+    --tts-engine pocket \
+    --voice-sample speaker.wav \
+    -o dubbed.wav
+```
+
+Predefined voices: `alba` · `marius` · `javert` · `jean` · `fantine` · `cosette` · `eponine` · `azelma`.
+Long voice references are automatically trimmed to 30 s to prevent hallucination.
+
 ## Control Playback Speed
 
 By default, dubbed segments are placed at their original timestamps without speed adjustment. Use tempo flags to control pacing:

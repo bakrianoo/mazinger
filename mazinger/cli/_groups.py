@@ -189,8 +189,9 @@ def add_tts_engine(p: argparse.ArgumentParser) -> None:
     p.add_argument("--tts-language", default=None, type=_language_type,
                    help="Target TTS language (defaults to --target-language).")
     p.add_argument(
-        "--tts-engine", default="qwen", choices=["qwen", "chatterbox", "mlx"],
-        help="TTS engine: 'qwen' (Qwen3-TTS), 'chatterbox' (ResembleAI Chatterbox), or 'mlx' (Apple Silicon).",
+        "--tts-engine", default="qwen", choices=["qwen", "chatterbox", "mlx", "pocket"],
+        help="TTS engine: 'qwen' (Qwen3-TTS), 'chatterbox' (ResembleAI Chatterbox), "
+             "'mlx' (Apple Silicon), or 'pocket' (Pocket TTS, CPU-only, English only).",
     )
     p.add_argument("--mlx-tts-model", default=DEFAULT_MLX_MODEL,
                    help="MLX Qwen3-TTS model name (default: mlx-community/Qwen3-TTS-12Hz-0.6B-Base-bf16).")
@@ -198,6 +199,9 @@ def add_tts_engine(p: argparse.ArgumentParser) -> None:
                    help="Chatterbox exaggeration level (0.0-1.0, default 0.5).")
     p.add_argument("--chatterbox-cfg", type=float, default=0.5,
                    help="Chatterbox CFG weight (0.0-1.0, default 0.5).")
+    p.add_argument("--pocket-voice", default=None,
+                   help="Predefined Pocket TTS voice name (e.g. 'alba', 'marius'). "
+                        "Overrides --voice-sample when --tts-engine pocket.")
 
 
 def add_tempo(p: argparse.ArgumentParser) -> None:

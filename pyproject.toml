@@ -64,6 +64,11 @@ tts-chatterbox = [
     "pandas>=2.2",  # Override chatterbox-tts pinned version for Python 3.12+
     # setuptools<70 removed: pkg_resources is deprecated but still present in setuptools 70+
 ]
+# TTS with Pocket TTS (lightweight, CPU-only, English only)
+# Compatible with ALL transcription backends (no GPU or transformers dependency).
+tts-pocket = [
+    "pocket-tts>=1.0",
+]
 # Optional: flash-attn for faster attention (requires CUDA, complex build)
 flash-attn = [
     "flash-attn>=2.0",

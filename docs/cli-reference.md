@@ -51,13 +51,14 @@ mazinger dub <source> [options]
 | `--asr-review` | off | Review ASR transcript with LLM to fix typos and punctuation |
 | `--keep-technical-english` | off | Convert technical terms to English in the source transcript (requires `--asr-review`) |
 | `--youtube-subs` | off | Download YouTube subtitles and compare with ASR to pick the best source |
-| `--tts-engine` | `qwen` | `qwen`, `chatterbox`, or `mlx` |
+| `--tts-engine` | `qwen` | `qwen`, `chatterbox`, `mlx`, or `pocket` (CPU-only, English only) |
 | `--tts-model` | `Qwen/Qwen3-TTS-12Hz-1.7B-Base` | Qwen model ID |
 | `--mlx-tts-model` | `mlx-community/Qwen3-TTS-12Hz-0.6B-Base-bf16` | MLX TTS model name |
 | `--chatterbox-model` | `ResembleAI/chatterbox` | Chatterbox model ID |
 | `--tts-language` | same as `--target-language` | Language hint for TTS |
 | `--chatterbox-exaggeration` | `0.5` | Emotion intensity (0.0–1.0) |
 | `--chatterbox-cfg` | `0.5` | Pacing control (0.0–1.0) |
+| `--pocket-voice` | — | Predefined Pocket TTS voice (`alba`, `marius`, `javert`, `jean`, `fantine`, `cosette`, `eponine`, `azelma`). Overrides `--voice-sample` when `--tts-engine pocket`. |
 | `--use-resegmented` | off | Use resegmented SRT instead of raw transcription |
 | `--output-type` | `audio` | `audio` (WAV only) or `video` (muxed MP4) |
 | `--embed-subtitles` | off | Burn subtitles into output video (implies `--output-type video`) |
@@ -369,13 +370,14 @@ mazinger speak [source] [options]
 | `--voice-script` | — | Path to transcript of voice sample |
 | `-o`, `--output` | — | Output WAV path |
 | `--segments-dir` | — | Directory for individual segment WAVs |
-| `--tts-engine` | `qwen` | `qwen`, `chatterbox`, or `mlx` |
+| `--tts-engine` | `qwen` | `qwen`, `chatterbox`, `mlx`, or `pocket` (CPU-only, English only) |
 | `--tts-model` | `Qwen/Qwen3-TTS-12Hz-1.7B-Base` | Qwen model ID |
 | `--mlx-tts-model` | `mlx-community/Qwen3-TTS-12Hz-0.6B-Base-bf16` | MLX TTS model name |
 | `--chatterbox-model` | `ResembleAI/chatterbox` | Chatterbox model ID |
 | `--tts-language` | — | Language hint for TTS |
 | `--chatterbox-exaggeration` | `0.5` | Emotion intensity (0.0–1.0) |
 | `--chatterbox-cfg` | `0.5` | Pacing control (0.0–1.0) |
+| `--pocket-voice` | — | Predefined Pocket TTS voice (`alba`, `marius`, etc.) — overrides `--voice-sample` for `--tts-engine pocket` |
 | `--device` | `auto` | `auto`, `cuda`, `cpu` |
 | `--dtype` | `bfloat16` | Weight dtype for Qwen: `bfloat16`, `float16`, `float32` |
 | `--dynamic-tempo` | off | Per-segment tempo matching |
@@ -400,6 +402,10 @@ mazinger speak --srt translated.srt --original-audio audio.mp3 \
     --tts-engine chatterbox \
     --chatterbox-exaggeration 0.7 --chatterbox-cfg 0.3 \
     -o dubbed.wav
+
+# Pocket TTS (CPU-only, predefined voice, no files needed)
+mazinger speak --srt translated.srt --original-audio audio.mp3 \
+    --tts-engine pocket --pocket-voice alba -o dubbed.wav
 
 # Fixed tempo speed-up
 mazinger speak --srt translated.srt --original-audio audio.mp3 \
