@@ -23,7 +23,7 @@ mazinger dub "https://youtube.com/watch?v=VIDEO_ID" --clone-profile abubakr
 # Or pass directly
 mazinger dub "https://youtube.com/watch?v=VIDEO_ID" \
     --clone-profile abubakr \
-    --openai-api-key "sk..."
+    --openai-api-key "sk-..."
 ```
 
 ## Using a Custom LLM Provider
