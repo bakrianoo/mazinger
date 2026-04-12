@@ -1185,11 +1185,9 @@ def transcribe(
         )
     elif method == "mlx-whisper":
         if beam_size is not None:
-            raise ValueError(
-                "beam_size not supported with mlx-whisper (uses sampling-based decoding). "
-                "Use method='faster-whisper' or method='whisperx' for beam search."
-            )
-        log.info("MLX Whisper uses sampling-based decoding")
+            log.info("MLX Whisper uses sampling-based decoding (beam_size is ignored)")
+        else:
+            log.info("MLX Whisper uses sampling-based decoding")
         raw_segments, detected_lang = _transcribe_mlx_whisper(
             audio_path,
             model=mlx_whisper_model,
