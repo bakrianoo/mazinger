@@ -8,7 +8,7 @@
 
 1. **[Installation](installation.md)** — Install methods, optional extras, compatibility notes, Colab and venv recipes
 2. **[Quick Start](quick-start.md)** — Common workflows with ready-to-use examples
-3. **[Pipeline Overview](pipeline.md)** — How the nine stages connect, data flow, resume behavior
+3. **[Pipeline Overview](pipeline.md)** — How the ten stages connect, data flow, resume behavior
 4. **[CLI Reference](cli-reference.md)** — Every command, flag, and default value
 5. **[Python API](python-api.md)** — Classes, functions, and parameters for programmatic use
 6. **[Voice Profiles](voice-profiles.md)** — Voice themes, built-in profiles, custom voice cloning, and profile generation

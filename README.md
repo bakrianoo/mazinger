@@ -218,7 +218,7 @@ Full documentation lives in the [`docs/`](docs/) directory:
 |---------|----------|
 | [Installation](docs/installation.md) | All install methods, extras, compatibility matrix, Colab and venv recipes |
 | [Quick Start](docs/quick-start.md) | Common workflows with copy-paste examples |
-| [Pipeline Overview](docs/pipeline.md) | How the nine stages connect, data flow, and resume behavior |
+| [Pipeline Overview](docs/pipeline.md) | How the ten stages connect, data flow, and resume behavior |
 | [CLI Reference](docs/cli-reference.md) | Every command, flag, and default value |
 | [Python API](docs/python-api.md) | Classes, functions, and parameters for programmatic use |
 | [Voice Profiles](docs/voice-profiles.md) | Using, creating, and uploading voice profiles |

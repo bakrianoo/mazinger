@@ -2,7 +2,7 @@
 
 ## MazingerDubber
 
-The main pipeline class. Orchestrates all nine stages.
+The main pipeline class. Orchestrates all ten stages.
 
 ```python
 from mazinger import MazingerDubber

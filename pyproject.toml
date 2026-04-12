@@ -21,6 +21,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+]
 # Fast local transcription with faster-whisper (CTranslate2)
 # Compatible with ALL TTS engines (no transformers version conflicts)
 # Recommended for offline/local transcription with Chatterbox TTS.
@@ -119,3 +122,7 @@ override-dependencies = [
 # Build dependencies for packages with missing build requirements
 [tool.uv.extra-build-dependencies]
 pkuseg = ["numpy"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
