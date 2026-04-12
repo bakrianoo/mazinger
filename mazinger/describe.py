@@ -151,6 +151,12 @@ def describe_content(
         usage_tracker.record("describe", llm_model, resp)
     description = json_repair.loads(resp.choices[0].message.content)
 
+    # Guard: small/local LLMs may return a non-dict (list, string, etc.).
+    # Wrap into the expected schema so downstream code doesn't crash.
+    if not isinstance(description, dict):
+        log.warning("LLM returned non-dict description (%s), wrapping into schema", type(description).__name__)
+        description = {"title": "", "summary": str(description), "keypoints": [], "keywords": []}
+
     # ── Post-process: deduplicate keypoints and keywords ──────────
     if isinstance(description.get("keypoints"), list):
         seen = set()
