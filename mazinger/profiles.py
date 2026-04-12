@@ -691,26 +691,36 @@ def fetch_profile(profile_name: str, cache_dir: str | None = None) -> tuple[str,
     default_url = DEFAULT_PROFILES_REPO_URL
     custom_url = CUSTOM_PROFILES_REPO_URL
 
-    in_default, default_err = _profile_exists(default_url)
-    in_custom, custom_err = _profile_exists(custom_url) if custom_url else (False, "")
+    default_err = ""
+    custom_err = ""
 
-    if in_default and in_custom:
-        base_url = custom_url
-        log.info("Profile found in both repos, using custom repo")
-    elif in_custom:
-        base_url = custom_url
-    elif in_default:
-        base_url = default_url
+    if custom_url:
+        in_custom, custom_err = _profile_exists(custom_url)
+        if in_custom:
+            base_url = custom_url
+        else:
+            in_default, default_err = _profile_exists(default_url)
+            if in_default:
+                base_url = default_url
+            else:
+                msg = f"Profile '{profile_name}' not found in any repo."
+                if custom_err:
+                    if "401" in custom_err:
+                        msg += " Custom repo requires auth - set HF_TOKEN."
+                    elif "404" in custom_err:
+                        msg += " Custom repo: check name and that files are named 'script.txt' and 'voice.wav'."
+                if default_err:
+                    msg += f" Default repo error: {default_err}"
+                raise FileNotFoundError(msg)
     else:
-        msg = f"Profile '{profile_name}' not found in any repo."
-        if custom_url and custom_err:
-            if "401" in custom_err:
-                msg += " Custom repo requires auth - set HF_TOKEN."
-            elif "404" in custom_err:
-                msg += " Custom repo: check name and that files are named 'script.txt' and 'voice.wav'."
-        if not in_default and default_err:
-            msg += f" Default repo error: {default_err}"
-        raise FileNotFoundError(msg)
+        in_default, default_err = _profile_exists(default_url)
+        if in_default:
+            base_url = default_url
+        else:
+            msg = f"Profile '{profile_name}' not found in any repo."
+            if default_err:
+                msg += f" Default repo error: {default_err}"
+            raise FileNotFoundError(msg)
 
     if cache_dir is None:
         cache_dir = os.path.join(
