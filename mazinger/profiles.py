@@ -678,7 +678,8 @@ def fetch_profile(profile_name: str, cache_dir: str | None = None) -> tuple[str,
     def _profile_exists(base_url: str) -> tuple[bool, str]:
         url = f"{base_url}/{profile_name}/{SCRIPT_FILENAME}"
         try:
-            urllib.request.urlopen(_make_request(url, "HEAD"), timeout=10)
+            with urllib.request.urlopen(_make_request(url, "HEAD"), timeout=10) as response:
+                pass
             return True, ""
         except HTTPError as e:
             return False, str(e.code)
