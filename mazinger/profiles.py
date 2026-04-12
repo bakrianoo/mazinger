@@ -4,16 +4,19 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 import subprocess
+import sys
 import tempfile
 import urllib.request
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 
 log = logging.getLogger(__name__)
 
-PROFILES_REPO_URL = (
-    "https://huggingface.co/datasets/bakrianoo/mazinger-dubber-profiles/resolve/main/profiles"
-)
+CUSTOM_PROFILES_REPO_URL = os.environ.get("MAZINGER_PROFILES_REPO_URL")
+DEFAULT_PROFILES_REPO_URL = "https://huggingface.co/datasets/bakrianoo/mazinger-dubber-profiles/resolve/main/profiles"
+PROFILES_REPO_URL = DEFAULT_PROFILES_REPO_URL
+HF_TOKEN = os.environ.get("HF_TOKEN")
 
 SCRIPT_FILENAME = "script.txt"
 VOICE_EXTENSIONS = ("wav", "m4a", "mp3")
@@ -23,11 +26,19 @@ MAX_CLONE_DURATION = 60.0
 MIN_CLONE_WORDS = 20
 
 
+def _make_request(url: str, method: str = "GET") -> urllib.request.Request:
+    req = urllib.request.Request(url, method=method)
+    if HF_TOKEN:
+        req.add_header("Authorization", f"Bearer {HF_TOKEN}")
+    return req
+
+
 def _download_file(url: str, dest: str) -> None:
-    """Download *url* to *dest*, creating parent directories as needed."""
     os.makedirs(os.path.dirname(dest), exist_ok=True)
     log.info("Downloading %s -> %s", url, dest)
-    urllib.request.urlretrieve(url, dest)  # noqa: S310 – trusted HF URL
+    with urllib.request.urlopen(_make_request(url), timeout=30) as response:
+        with open(dest, "wb") as f:
+            shutil.copyfileobj(response, f)
 
 
 def _convert_to_wav(src: str, dest: str) -> None:
@@ -664,13 +675,60 @@ def fetch_profile(profile_name: str, cache_dir: str | None = None) -> tuple[str,
     if os.path.isdir(profile_name):
         return _load_local_profile(profile_name)
 
+    def _profile_exists(base_url: str) -> tuple[bool, str]:
+        url = f"{base_url}/{profile_name}/{SCRIPT_FILENAME}"
+        try:
+            with urllib.request.urlopen(_make_request(url, "HEAD"), timeout=10) as response:
+                pass
+            return True, ""
+        except HTTPError as e:
+            return False, str(e.code)
+        except URLError as e:
+            return False, str(e.reason)
+        except Exception as e:
+            return False, str(e)
+
+    default_url = DEFAULT_PROFILES_REPO_URL
+    custom_url = CUSTOM_PROFILES_REPO_URL
+
+    default_err = ""
+    custom_err = ""
+
+    if custom_url:
+        in_custom, custom_err = _profile_exists(custom_url)
+        if in_custom:
+            base_url = custom_url
+        else:
+            in_default, default_err = _profile_exists(default_url)
+            if in_default:
+                base_url = default_url
+            else:
+                msg = f"Profile '{profile_name}' not found in any repo."
+                if custom_err:
+                    if "401" in custom_err:
+                        msg += " Custom repo requires auth - set HF_TOKEN."
+                    elif "404" in custom_err:
+                        msg += " Custom repo: check name and that files are named 'script.txt' and 'voice.wav'."
+                if default_err:
+                    msg += f" Default repo error: {default_err}"
+                raise FileNotFoundError(msg)
+    else:
+        in_default, default_err = _profile_exists(default_url)
+        if in_default:
+            base_url = default_url
+        else:
+            msg = f"Profile '{profile_name}' not found in any repo."
+            if default_err:
+                msg += f" Default repo error: {default_err}"
+            raise FileNotFoundError(msg)
+
     if cache_dir is None:
         cache_dir = os.path.join(
             tempfile.gettempdir(), "mazinger-dubber-profiles"
         )
 
     profile_dir = os.path.join(cache_dir, profile_name)
-    base = f"{PROFILES_REPO_URL}/{profile_name}"
+    base = f"{base_url}/{profile_name}"
 
     # Download script
     script_path = os.path.join(profile_dir, SCRIPT_FILENAME)

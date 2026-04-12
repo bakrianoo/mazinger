@@ -393,6 +393,82 @@ mazinger dub "https://youtube.com/watch?v=VIDEO_ID" --clone-profile my-name
 
 ---
 
+## Using a Private HuggingFace Dataset
+
+You can use your own private HuggingFace dataset instead of the default public one. This is useful for storing custom voice profiles securely.
+
+### Setup
+
+**1. Set environment variables:**
+
+```bash
+# Your HuggingFace token (from https://huggingface.co/settings/tokens)
+export HF_TOKEN="hf_..."
+
+# Your private dataset URL
+export MAZINGER_PROFILES_REPO_URL="https://huggingface.co/datasets/YOUR_USERNAME/your-dataset/resolve/main/profiles"
+```
+
+Add these to your shell profile (`~/.zshrc`) for persistence.
+
+**2. Get your token:**
+
+```bash
+pip install huggingface_hub
+hf auth login  # or go to https://huggingface.co/settings/tokens
+```
+
+### Upload a Profile
+
+**1. Prepare the folder structure:**
+
+```bash
+mkdir -p profiles/your-voice-name
+cp your-voice.wav profiles/your-voice-name/voice.wav
+cp your-transcript.txt profiles/your-voice-name/script.txt
+```
+
+**2. Upload to your private dataset:**
+
+```bash
+# Create dataset first if needed: https://huggingface.co/datasets/new
+
+hf upload YOUR_USERNAME/mazinger-dubber-profiles \
+    ./profiles/your-voice-name \
+    profiles/your-voice-name \
+    --repo-type dataset
+```
+
+### Use Your Private Profile
+
+```bash
+mazinger dub "https://youtube.com/watch?v=VIDEO_ID" \
+    --clone-profile your-voice-name \
+    --target-language Spanish
+```
+
+### Priority Order
+
+When you set `MAZINGER_PROFILES_REPO_URL`:
+
+1. Custom repo is checked first
+2. If profile exists in both custom and default → uses custom repo
+3. Falls back to default repo if not found in custom
+
+### Python API
+
+```python
+import os
+
+os.environ["HF_TOKEN"] = "hf_..."
+os.environ["MAZINGER_PROFILES_REPO_URL"] = "https://huggingface.co/datasets/..."
+
+from mazinger.profiles import fetch_profile
+voice, script = fetch_profile("your-voice-name")
+```
+
+---
+
 ## Python API for Themes and Profiles
 
 ### List available themes

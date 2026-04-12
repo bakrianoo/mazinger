@@ -7,12 +7,17 @@
 | `OPENAI_API_KEY` | — | OpenAI API key for transcription and LLM tasks |
 | `OPENAI_BASE_URL` | — | Custom base URL for OpenAI-compatible API providers |
 | `OPENAI_MODEL` | `gpt-4.1` | Default LLM model for translation, description, etc. |
+| `HF_TOKEN` | — | HuggingFace token for accessing private voice profile datasets |
+| `MAZINGER_PROFILES_REPO_URL` | — | Custom HuggingFace dataset URL for voice profiles |
 
 CLI flags take precedence over environment variables. If neither is set, `OPENAI_MODEL` defaults to `gpt-4.1`.
 
 ```bash
 # Set via environment
 export OPENAI_API_KEY="sk-..."
+export HF_TOKEN="hf_..."           # For private datasets
+export MAZINGER_PROFILES_REPO_URL="https://huggingface.co/datasets/YOUR_NAME/dataset/resolve/main/profiles"
+
 mazinger dub "https://youtube.com/watch?v=VIDEO_ID" --clone-profile abubakr
 
 # Or pass directly
