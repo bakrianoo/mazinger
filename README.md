@@ -26,7 +26,7 @@ Mazinger chains ten stages into a single pipeline:
 5. **Review** — optionally refine ASR output: fix typos, reshape punctuation, and convert technical terms to English
 6. **Translate** — translate the SRT into another language with duration-aware word budgets
 7. **Re-segment** — merge fragments and split oversized subtitles for readability
-8. **Speak** — synthesize voice-cloned speech for every subtitle entry (Qwen3-TTS, Chatterbox, or MLX), with 16 pre-defined voice themes or your own voice sample
+8. **Speak** — synthesize voice-cloned speech for every subtitle entry (Qwen3-TTS, Chatterbox, OmniVoice, or MLX), with 16 pre-defined voice themes or your own voice sample
 9. **Assemble** — place each audio segment on the original timeline with optional tempo adjustment, loudness matching, and background audio mixing
 10. **Subtitle** — burn styled subtitles into the video and/or mux the new audio track
 
@@ -61,6 +61,7 @@ pip install "mazinger[transcribe-deepgram]"    # Deepgram Nova 3 (cloud, free $2
 # Voice synthesis
 pip install "mazinger[tts]"                    # Qwen3-TTS (voice sample + transcript)
 pip install "mazinger[tts-chatterbox]"         # Chatterbox (voice sample only, emotion control)
+pip install "mazinger[tts-omnivoice]"          # OmniVoice (24 languages, zero-shot cloning)
 pip install "mazinger[tts-mlx]"                # MLX Qwen3-TTS (Apple Silicon)
 
 # MLX transcription (Apple Silicon)
@@ -69,6 +70,7 @@ pip install "mazinger[transcribe-mlx]"         # MLX Whisper (Apple Silicon)
 # Full bundles
 pip install "mazinger[all-qwen]"              # faster-whisper + Qwen3-TTS
 pip install "mazinger[all-chatterbox]"        # faster-whisper + Chatterbox
+pip install "mazinger[all-omnivoice]"         # faster-whisper + OmniVoice
 pip install "mazinger[all-mlx]"               # MLX Whisper + MLX Qwen3-TTS
 ```
 

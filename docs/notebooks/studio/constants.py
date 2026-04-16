@@ -1,10 +1,22 @@
 """Shared constants for Mazinger Studio."""
 
-# Qwen3-TTS supported languages only
-LANGUAGES = [
+# Qwen3-TTS supported languages
+QWEN_LANGUAGES = [
     "Chinese", "English", "French", "German", "Italian",
     "Japanese", "Korean", "Portuguese", "Russian", "Spanish",
 ]
+
+# OmniVoice supported languages
+OMNIVOICE_LANGUAGES = [
+    "Arabic", "Cantonese", "Chinese", "Czech", "Dutch",
+    "English", "Finnish", "French", "German", "Greek",
+    "Hindi", "Indonesian", "Italian", "Japanese", "Korean",
+    "Polish", "Portuguese", "Romanian", "Russian", "Spanish",
+    "Thai", "Turkish", "Ukrainian", "Vietnamese",
+]
+
+# Default language list (union, sorted)
+LANGUAGES = sorted(set(QWEN_LANGUAGES + OMNIVOICE_LANGUAGES))
 
 VOICE_PRESETS = ["abubakr", "daheeh-v1", "italian-v1", "trump-v1"]
 

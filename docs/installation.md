@@ -35,6 +35,7 @@ in free credits without a credit card. Set `DEEPGRAM_API_KEY` and use `--method 
 ```bash
 pip install "mazinger[tts]"                    # Qwen3-TTS — needs a voice sample + transcript
 pip install "mazinger[tts-chatterbox]"         # Chatterbox — needs only a voice sample, has emotion control
+pip install "mazinger[tts-omnivoice]"          # OmniVoice — 24 languages, zero-shot voice cloning
 pip install "mazinger[tts-mlx]"                # MLX Qwen3-TTS — Apple Silicon (M1/M2/M3/M4/M5)
 ```
 
@@ -49,6 +50,7 @@ pip install "mazinger[transcribe-mlx]"         # MLX Whisper — Apple Silicon
 ```bash
 pip install "mazinger[all-qwen]"              # faster-whisper + Qwen3-TTS
 pip install "mazinger[all-chatterbox]"        # faster-whisper + Chatterbox
+pip install "mazinger[all-omnivoice]"         # faster-whisper + OmniVoice (24 languages)
 pip install "mazinger[all-mlx]"               # MLX Whisper + MLX Qwen3-TTS (Apple Silicon only)
 ```
 
@@ -59,8 +61,7 @@ Qwen, Chatterbox, and MLX pull different versions of `transformers` and cannot c
 | Extra | transformers | Compatible with |
 |-------|-------------|-----------------|
 | `tts` (Qwen) | ≥ 4.48 | `transcribe-faster`, `transcribe-whisperx` |
-| `tts-chatterbox` | == 4.46.3 | `transcribe-faster`, OpenAI transcription |
-| `tts-mlx` | (mlx-audio) | `transcribe-mlx` |
+| `tts-chatterbox` | == 4.46.3 | `transcribe-faster`, OpenAI transcription || `tts-omnivoice` | (omnivoice) | `transcribe-faster`, `transcribe-whisperx` || `tts-mlx` | (mlx-audio) | `transcribe-mlx` |
 | `all-mlx` | (mlx-audio + mlx-whisper) | Apple Silicon only |
 
 WhisperX requires `transformers>=4.48`, so it conflicts with Chatterbox. When using Chatterbox, choose `transcribe-faster` or the cloud-based OpenAI transcription.
@@ -81,10 +82,12 @@ WhisperX requires `transformers>=4.48`, so it conflicts with Chatterbox. When us
 | Re-segment | `mazinger resegment` | yes | — |
 | Speak (Qwen) | `mazinger speak` | no | `tts` + CUDA |
 | Speak (Chatterbox) | `mazinger speak --tts-engine chatterbox` | no | `tts-chatterbox` + CUDA |
+| Speak (OmniVoice) | `mazinger speak --tts-engine omnivoice` | no | `tts-omnivoice` + CUDA |
 | Speak (MLX) | `mazinger speak --tts-engine mlx` | no | `tts-mlx` + Apple Silicon |
 | Subtitle embed | `mazinger subtitle` | yes | ffmpeg only |
 | Full dub (Qwen) | `mazinger dub` | no | `all-qwen` + CUDA |
 | Full dub (Chatterbox) | `mazinger dub --tts-engine chatterbox` | no | `all-chatterbox` + CUDA |
+| Full dub (OmniVoice) | `mazinger dub --tts-engine omnivoice` | no | `all-omnivoice` + CUDA |
 | Full dub (MLX) | `mazinger dub --tts-engine mlx` | no | `all-mlx` + Apple Silicon |
 
 ## System Dependencies
@@ -128,6 +131,18 @@ torchaudio>=2.0
 EOF
 
 uv pip install --override /tmp/qwen_overrides.txt "mazinger[all-qwen]"
+```
+
+### Fresh venv with OmniVoice (Python 3.12)
+
+```bash
+uv venv .venv --python 3.12
+source .venv/bin/activate
+
+uv pip install torch torchaudio \
+    --index-url https://download.pytorch.org/whl/cu128
+
+uv pip install "mazinger[all-omnivoice]"
 ```
 
 ### Google Colab — Chatterbox

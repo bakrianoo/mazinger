@@ -31,8 +31,9 @@ def _remove_from_cache(obj: Any) -> None:
 #  TTS Engine Type
 # ═══════════════════════════════════════════════════════════════════════════════
 
-TTSEngine = Literal["qwen", "chatterbox", "mlx"]
+TTSEngine = Literal["qwen", "chatterbox", "mlx", "omnivoice"]
 DEFAULT_MLX_MODEL = "mlx-community/Qwen3-TTS-12Hz-0.6B-Base-bf16"
+DEFAULT_OMNIVOICE_MODEL = "k2-fsa/OmniVoice"
 
 SUPPORTED_LANGUAGES = (
     "Chinese", "English", "Japanese", "Korean",
@@ -339,6 +340,86 @@ class _MLXTTSWrapper(TTSWrapper):
         log.info("MLX TTS model unloaded, GPU memory freed.")
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+#  OmniVoice Backend
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_OMNIVOICE_SAMPLE_RATE = 24_000
+
+
+def _load_omnivoice_model(
+    model_name: str = DEFAULT_OMNIVOICE_MODEL,
+    device: str = "cuda:0",
+    dtype: str = "float16",
+) -> Any:
+    """Load an OmniVoice model and return it."""
+    import torch
+    try:
+        from omnivoice import OmniVoice
+    except ImportError:
+        raise ImportError(
+            "omnivoice not installed. Install with: pip install 'mazinger[tts-omnivoice]'\n"
+            "Or use engine='qwen' for Qwen3-TTS."
+        ) from None
+
+    dtype_map = {
+        "bfloat16": torch.bfloat16,
+        "float16": torch.float16,
+        "float32": torch.float32,
+    }
+    torch_dtype = dtype_map.get(dtype, torch.float16)
+
+    _is_cpu = "cpu" in str(device)
+    if torch_dtype == torch.bfloat16 and (
+        _is_cpu or not torch.cuda.is_bf16_supported()
+    ):
+        log.warning(
+            "bfloat16 not supported on %s — falling back to float16", device,
+        )
+        torch_dtype = torch.float16
+        dtype = "float16"
+    elif torch_dtype == torch.float16 and _is_cpu:
+        log.warning(
+            "float16 not efficient on CPU — falling back to float32",
+        )
+        torch_dtype = torch.float32
+        dtype = "float32"
+
+    model = OmniVoice.from_pretrained(
+        model_name, device_map=device, dtype=torch_dtype,
+    )
+    log.info("Loaded OmniVoice model: %s on %s (%s)", model_name, device, dtype)
+    return model
+
+
+class _OmniVoiceTTSWrapper(TTSWrapper):
+
+    engine = "omnivoice"
+
+    def __init__(self, model: Any, ref_audio: str, ref_text: str | None = None):
+        self.model = model
+        self.ref_audio = ref_audio
+        self.ref_text = ref_text
+
+    def synthesize(self, text: str, language: str = "English") -> tuple[np.ndarray, int]:
+        kw: dict[str, Any] = {"text": text, "ref_audio": self.ref_audio}
+        if self.ref_text:
+            kw["ref_text"] = self.ref_text
+        audio_list = self.model.generate(**kw)
+        if not audio_list:
+            raise RuntimeError(
+                f"OmniVoice generate() returned no results "
+                f"(text={text!r}, ref_audio={self.ref_audio!r})"
+            )
+        return audio_list[0], _OMNIVOICE_SAMPLE_RATE
+
+    def unload(self) -> None:
+        import torch
+        _remove_from_cache(self.model)
+        del self.model
+        gc.collect()
+        torch.cuda.empty_cache()
+        log.info("OmniVoice model unloaded, GPU memory freed.")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -352,15 +433,17 @@ def load_model(
     engine: TTSEngine = "qwen",
     chatterbox_model: str = "ResembleAI/chatterbox",
     mlx_model: str = DEFAULT_MLX_MODEL,
+    omnivoice_model: str = DEFAULT_OMNIVOICE_MODEL,
 ) -> Any:
     """Load a TTS model and return it.
 
     Parameters:
         model_name:        HuggingFace model identifier (used for Qwen).
         device:            Target device (e.g. ``cuda:0``).
-        dtype:             Weight dtype for Qwen (``bfloat16``, ``float16``, ``float32``).
-        engine:            TTS engine: ``qwen`` or ``chatterbox``.
+        dtype:             Weight dtype (``bfloat16``, ``float16``, ``float32``).
+        engine:            TTS engine: ``qwen``, ``chatterbox``, ``mlx``, or ``omnivoice``.
         chatterbox_model:  HuggingFace model identifier for Chatterbox.
+        omnivoice_model:   HuggingFace model identifier for OmniVoice.
 
     Returns:
         The loaded model instance.
@@ -369,6 +452,8 @@ def load_model(
         name = chatterbox_model
     elif engine == "mlx":
         name = mlx_model
+    elif engine == "omnivoice":
+        name = omnivoice_model
     else:
         name = model_name
     key = _cache_key(engine, name, device, dtype)
@@ -382,6 +467,8 @@ def load_model(
         model = _load_chatterbox_model(device, chatterbox_model)
     elif engine == "mlx":
         model = _load_mlx_model(mlx_model)
+    elif engine == "omnivoice":
+        model = _load_omnivoice_model(omnivoice_model, device, dtype)
     else:
         raise ValueError(f"Unknown TTS engine: {engine!r}")
 
@@ -397,6 +484,7 @@ def create_voice_prompt(
     chatterbox_exaggeration: float = 0.5,
     chatterbox_cfg: float = 0.5,
     mlx_model: str = DEFAULT_MLX_MODEL,
+    omnivoice_model: str = DEFAULT_OMNIVOICE_MODEL,
 ) -> TTSWrapper:
     """Build a reusable voice-clone prompt from a reference recording.
 
@@ -405,8 +493,8 @@ def create_voice_prompt(
         ref_audio: Path to the reference audio file.
         ref_text:  Transcript of the reference audio.  When ``None``,
                    Qwen uses x-vector-only mode (no transcript needed).
-                   Ignored for Chatterbox.
-        engine:    TTS engine: ``qwen`` or ``chatterbox``.
+                   Ignored for Chatterbox and OmniVoice.
+        engine:    TTS engine: ``qwen``, ``chatterbox``, ``mlx``, or ``omnivoice``.
         chatterbox_exaggeration: Exaggeration level for Chatterbox (0.0-1.0).
         chatterbox_cfg:          CFG weight for Chatterbox (0.0-1.0).
 
@@ -424,6 +512,9 @@ def create_voice_prompt(
     elif engine == "mlx":
         log.info("MLX Qwen3-TTS voice clone configured from %s", ref_audio)
         return _MLXTTSWrapper(model, ref_audio, ref_text)
+    elif engine == "omnivoice":
+        log.info("OmniVoice voice clone configured from %s", ref_audio)
+        return _OmniVoiceTTSWrapper(model, ref_audio, ref_text)
     else:
         raise ValueError(f"Unknown TTS engine: {engine!r}")
 

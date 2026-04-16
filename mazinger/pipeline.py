@@ -7,7 +7,7 @@ import os
 from typing import Any
 
 from mazinger.paths import ProjectPaths
-from mazinger.tts import DEFAULT_MLX_MODEL
+from mazinger.tts import DEFAULT_MLX_MODEL, DEFAULT_OMNIVOICE_MODEL
 from mazinger.utils import (
     save_json, load_json, get_audio_duration, LLMUsageTracker,
     is_valid_media_file, is_valid_srt_file, is_valid_json_file,
@@ -86,6 +86,7 @@ class MazingerDubber:
         chatterbox_model: str = "ResembleAI/chatterbox",
         chatterbox_exaggeration: float = 0.5,
         chatterbox_cfg: float = 0.5,
+        omnivoice_model: str = DEFAULT_OMNIVOICE_MODEL,
         loudness_match: bool = True,
         mix_background: bool = True,
         background_volume: float = 0.15,
@@ -466,6 +467,7 @@ class MazingerDubber:
             dtype=tts_dtype, engine=tts_engine,
             chatterbox_model=chatterbox_model,
             mlx_model=mlx_model,
+            omnivoice_model=omnivoice_model,
         )
         voice_prompt = tts.create_voice_prompt(
             tts_model, voice_sample, ref_text,
@@ -473,6 +475,7 @@ class MazingerDubber:
             chatterbox_exaggeration=chatterbox_exaggeration,
             chatterbox_cfg=chatterbox_cfg,
             mlx_model=mlx_model,
+            omnivoice_model=omnivoice_model,
         )
         segment_info = tts.synthesize_segments(
             tts_model, voice_prompt, srt_entries, proj.tts_segments_dir,

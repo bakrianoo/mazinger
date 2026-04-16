@@ -72,6 +72,12 @@ flash-attn = [
 audio-enhance = [
     "demucs>=4.0.1",
 ]
+# TTS with OmniVoice — 24 languages, zero-shot voice cloning
+tts-omnivoice = [
+    "omnivoice",
+    "torch>=2.0",
+    "soundfile>=0.12",
+]
 # Full pipeline with Qwen TTS — same as bare install (kept as alias)
 all-qwen = [
     "mazinger[transcribe-faster,tts,audio-enhance]",
@@ -79,6 +85,10 @@ all-qwen = [
 # Full pipeline with Chatterbox TTS + faster-whisper (fully compatible)
 all-chatterbox = [
     "mazinger[transcribe-faster,tts-chatterbox,audio-enhance]",
+]
+# Full pipeline with OmniVoice TTS + faster-whisper
+all-omnivoice = [
+    "mazinger[transcribe-faster,tts-omnivoice,audio-enhance]",
 ]
 # TTS with MLX Qwen3-TTS for Apple Silicon
 tts-mlx = [

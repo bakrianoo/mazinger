@@ -129,7 +129,9 @@ Generates a WAV file for each subtitle entry using voice-cloned TTS.
 
 **Chatterbox** requires only a voice sample. It supports 23 languages and has emotion control parameters (`exaggeration` and `cfg`).
 
-**Voice themes** offer a third option: instead of providing a voice sample, pass `--voice-theme` to select from 16 pre-defined themes (e.g. `narrator-m`, `warm-f`, `kid-m`). The theme generates a reference voice via Qwen3-TTS VoiceDesign. When used with `dub` or `speak`, the generated profile is saved to the project's `voice_profile/` directory and reused on subsequent runs.
+**OmniVoice** supports 24 languages with zero-shot voice cloning. It requires a voice sample and optionally a transcript. Built on a diffusion language model architecture, it delivers fast inference (RTF ~0.025) and state-of-the-art voice cloning quality. Supported languages: Arabic, Cantonese, Chinese, Czech, Dutch, English, Finnish, French, German, Greek, Hindi, Indonesian, Italian, Japanese, Korean, Polish, Portuguese, Romanian, Russian, Spanish, Thai, Turkish, Ukrainian, and Vietnamese.
+
+**Voice themes** offer a fourth option: instead of providing a voice sample, pass `--voice-theme` to select from 16 pre-defined themes (e.g. `narrator-m`, `warm-f`, `kid-m`). The theme generates a reference voice via Qwen3-TTS VoiceDesign. When used with `dub` or `speak`, the generated profile is saved to the project's `voice_profile/` directory and reused on subsequent runs.
 
 Each segment is saved individually (`seg_0001.wav`, `seg_0002.wav`, ...) so interrupted runs can resume without re-synthesizing completed segments.
 

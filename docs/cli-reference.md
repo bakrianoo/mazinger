@@ -51,10 +51,11 @@ mazinger dub <source> [options]
 | `--asr-review` | off | Review ASR transcript with LLM to fix typos and punctuation |
 | `--keep-technical-english` | off | Convert technical terms to English in the source transcript (requires `--asr-review`) |
 | `--youtube-subs` | off | Download YouTube subtitles and compare with ASR to pick the best source |
-| `--tts-engine` | `qwen` | `qwen`, `chatterbox`, or `mlx` |
+| `--tts-engine` | `qwen` | `qwen`, `chatterbox`, `mlx`, or `omnivoice` |
 | `--tts-model` | `Qwen/Qwen3-TTS-12Hz-1.7B-Base` | Qwen model ID |
 | `--mlx-tts-model` | `mlx-community/Qwen3-TTS-12Hz-0.6B-Base-bf16` | MLX TTS model name |
 | `--chatterbox-model` | `ResembleAI/chatterbox` | Chatterbox model ID |
+| `--omnivoice-model` | `k2-fsa/OmniVoice` | OmniVoice model ID |
 | `--tts-language` | same as `--target-language` | Language hint for TTS |
 | `--chatterbox-exaggeration` | `0.5` | Emotion intensity (0.0–1.0) |
 | `--chatterbox-cfg` | `0.5` | Pacing control (0.0–1.0) |
@@ -100,6 +101,12 @@ mazinger dub ./lecture.mp4 \
     --output-type video \
     --embed-subtitles \
     --target-language Spanish
+
+# Dub with OmniVoice (24 languages, zero-shot cloning)
+mazinger dub "https://youtube.com/watch?v=abc123" \
+    --voice-sample speaker.wav \
+    --tts-engine omnivoice \
+    --target-language Hindi
 
 # Dub only a portion of the video
 mazinger dub "https://youtube.com/watch?v=abc123" \
@@ -369,10 +376,11 @@ mazinger speak [source] [options]
 | `--voice-script` | — | Path to transcript of voice sample |
 | `-o`, `--output` | — | Output WAV path |
 | `--segments-dir` | — | Directory for individual segment WAVs |
-| `--tts-engine` | `qwen` | `qwen`, `chatterbox`, or `mlx` |
+| `--tts-engine` | `qwen` | `qwen`, `chatterbox`, `mlx`, or `omnivoice` |
 | `--tts-model` | `Qwen/Qwen3-TTS-12Hz-1.7B-Base` | Qwen model ID |
 | `--mlx-tts-model` | `mlx-community/Qwen3-TTS-12Hz-0.6B-Base-bf16` | MLX TTS model name |
 | `--chatterbox-model` | `ResembleAI/chatterbox` | Chatterbox model ID |
+| `--omnivoice-model` | `k2-fsa/OmniVoice` | OmniVoice model ID |
 | `--tts-language` | — | Language hint for TTS |
 | `--chatterbox-exaggeration` | `0.5` | Emotion intensity (0.0–1.0) |
 | `--chatterbox-cfg` | `0.5` | Pacing control (0.0–1.0) |

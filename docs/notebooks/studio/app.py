@@ -3,7 +3,8 @@
 import gradio as gr
 
 from constants import (
-    LANGUAGES, VOICE_PRESETS, METHOD_MAP, OLLAMA_DEFAULT_MODEL,
+    LANGUAGES, QWEN_LANGUAGES, OMNIVOICE_LANGUAGES,
+    VOICE_PRESETS, METHOD_MAP, OLLAMA_DEFAULT_MODEL,
     SEGMENT_MODE_MAP, THEME_CHOICES, VOICE_THEMES,
 )
 from theme import theme, CSS
@@ -292,7 +293,7 @@ with gr.Blocks(theme=theme, title="Mazinger Studio", css=CSS) as app:
 
             with gr.Tab("🗣️ TTS"):
                 tts_engine = gr.Dropdown(
-                    ["Qwen3-TTS"],
+                    ["Qwen3-TTS", "OmniVoice"],
                     value="Qwen3-TTS",
                     label="TTS engine",
                 )
@@ -502,6 +503,21 @@ with gr.Blocks(theme=theme, title="Mazinger Studio", css=CSS) as app:
     llm_provider.change(
         _on_llm_provider_change, llm_provider,
         [ollama_group, openai_group],
+    )
+
+    # ── TTS engine → language list ────────────────────────────────
+    _engine_languages = {
+        "Qwen3-TTS": QWEN_LANGUAGES,
+        "OmniVoice": OMNIVOICE_LANGUAGES,
+    }
+
+    def _on_tts_engine_change(engine):
+        langs = _engine_languages.get(engine, LANGUAGES)
+        return gr.update(choices=langs, value=langs[0] if langs else "English")
+
+    tts_engine.change(
+        _on_tts_engine_change, tts_engine,
+        [target_language],
     )
 
     # ── Wire everything ───────────────────────────────────────────

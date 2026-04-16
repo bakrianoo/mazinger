@@ -284,6 +284,24 @@ mazinger speak --srt translated.srt --original-audio audio.mp3 \
     -o dubbed.wav
 ```
 
+## Use OmniVoice
+
+Add `--tts-engine omnivoice` to use OmniVoice, which supports 24 languages with zero-shot voice cloning:
+
+```bash
+mazinger dub "https://youtube.com/watch?v=VIDEO_ID" \
+    --clone-profile abubakr \
+    --tts-engine omnivoice \
+    --target-language Hindi
+
+mazinger speak --srt translated.srt --original-audio audio.mp3 \
+    --voice-sample speaker.m4a \
+    --tts-engine omnivoice \
+    -o dubbed.wav
+```
+
+OmniVoice accepts an optional voice transcript (`--voice-script`) but does not require one.
+
 ## Use MLX (Apple Silicon)
 
 Add `--tts-engine mlx` to use MLX-accelerated TTS (requires Apple Silicon):
