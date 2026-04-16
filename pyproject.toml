@@ -26,6 +26,7 @@ dependencies = [
 # Recommended for offline/local transcription with Chatterbox TTS.
 transcribe-faster = [
     "faster-whisper>=1.0",
+    "nvidia-cublas-cu12>=12.0; platform_system == 'Linux'",
 ]
 # Local transcription with WhisperX (uses transformers>=4.48)
 # NOT compatible with tts-chatterbox due to transformers conflict.
@@ -103,6 +104,10 @@ transcribe-mlx = [
 # Full pipeline with MLX + faster-whisper fallback/support — Apple Silicon only
 all-mlx = [
     "mazinger[transcribe-faster,transcribe-mlx,tts-mlx]",
+]
+# Gradio web UI
+web = [
+    "gradio>=4.0",
 ]
 
 [project.scripts]

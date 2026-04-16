@@ -81,6 +81,17 @@ See the [Installation Guide](docs/installation.md) for venv recipes, Colab setup
 
 ## Quick Start
 
+### Launch the Web UI
+
+The easiest way to use Mazinger is through the built-in Gradio web interface. This installs Ollama (local LLM) and downloads the Faster Whisper model automatically:
+
+```bash
+pip install "mazinger[all-omnivoice,web]"
+mazinger web --with-ollama --with-faster-whisper
+```
+
+A local and public URL will appear — open it in your browser, paste a video URL, pick a voice, and go.
+
 ### Dub a video in one command
 
 ```bash
