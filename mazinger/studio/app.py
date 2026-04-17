@@ -238,9 +238,12 @@ with gr.Blocks(title="Mazinger Studio") as app:
         # ── Auto-Clone (clone voice from source — default) ──
         with gr.Group(visible=True) as autoclone_group:
             gr.Markdown(
-                "The speaker's voice is cloned directly from the source audio. "
-                "No voice files or settings needed — the pipeline picks the "
-                "best 20-60 s segment automatically.",
+                "**Qwen3-TTS / Chatterbox / MLX:** The speaker's voice is cloned "
+                "directly from the source audio. No voice files needed — the "
+                "pipeline picks the best 20-60 s segment automatically.\n\n"
+                "**OmniVoice:** Uses the model's built-in auto-voice mode — "
+                "no reference audio required. The model selects an appropriate "
+                "voice on its own.",
                 elem_classes="openai-info",
             )
 

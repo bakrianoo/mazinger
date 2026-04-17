@@ -422,6 +422,59 @@ class _OmniVoiceTTSWrapper(TTSWrapper):
         log.info("OmniVoice model unloaded, GPU memory freed.")
 
 
+class _OmniVoiceAutoTTSWrapper(TTSWrapper):
+    """OmniVoice in auto-voice mode — the model picks a voice automatically."""
+
+    engine = "omnivoice"
+
+    def __init__(self, model: Any):
+        self.model = model
+
+    def synthesize(self, text: str, language: str = "English") -> tuple[np.ndarray, int]:
+        audio_list = self.model.generate(text=text)
+        if not audio_list:
+            raise RuntimeError(
+                f"OmniVoice auto-voice generate() returned no results "
+                f"(text={text!r})"
+            )
+        return audio_list[0], _OMNIVOICE_SAMPLE_RATE
+
+    def unload(self) -> None:
+        import torch
+        _remove_from_cache(self.model)
+        del self.model
+        gc.collect()
+        torch.cuda.empty_cache()
+        log.info("OmniVoice model unloaded, GPU memory freed.")
+
+
+class _OmniVoiceDesignTTSWrapper(TTSWrapper):
+    """OmniVoice voice-design mode — voice controlled via instruct string."""
+
+    engine = "omnivoice"
+
+    def __init__(self, model: Any, instruct: str):
+        self.model = model
+        self.instruct = instruct
+
+    def synthesize(self, text: str, language: str = "English") -> tuple[np.ndarray, int]:
+        audio_list = self.model.generate(text=text, instruct=self.instruct)
+        if not audio_list:
+            raise RuntimeError(
+                f"OmniVoice voice-design generate() returned no results "
+                f"(text={text!r}, instruct={self.instruct!r})"
+            )
+        return audio_list[0], _OMNIVOICE_SAMPLE_RATE
+
+    def unload(self) -> None:
+        import torch
+        _remove_from_cache(self.model)
+        del self.model
+        gc.collect()
+        torch.cuda.empty_cache()
+        log.info("OmniVoice model unloaded, GPU memory freed.")
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Public API
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -485,6 +538,7 @@ def create_voice_prompt(
     chatterbox_cfg: float = 0.5,
     mlx_model: str = DEFAULT_MLX_MODEL,
     omnivoice_model: str = DEFAULT_OMNIVOICE_MODEL,
+    voice_design_instruct: str | None = None,
 ) -> TTSWrapper:
     """Build a reusable voice-clone prompt from a reference recording.
 
@@ -497,6 +551,10 @@ def create_voice_prompt(
         engine:    TTS engine: ``qwen``, ``chatterbox``, ``mlx``, or ``omnivoice``.
         chatterbox_exaggeration: Exaggeration level for Chatterbox (0.0-1.0).
         chatterbox_cfg:          CFG weight for Chatterbox (0.0-1.0).
+        voice_design_instruct:   OmniVoice voice-design instruct string
+                   (e.g. ``"female, low pitch, british accent"``).  When
+                   provided with ``engine="omnivoice"``, uses OmniVoice's
+                   built-in voice design instead of cloning from *ref_audio*.
 
     Returns:
         A :class:`TTSWrapper` instance ready for synthesis.
@@ -513,8 +571,15 @@ def create_voice_prompt(
         log.info("MLX Qwen3-TTS voice clone configured from %s", ref_audio)
         return _MLXTTSWrapper(model, ref_audio, ref_text)
     elif engine == "omnivoice":
-        log.info("OmniVoice voice clone configured from %s", ref_audio)
-        return _OmniVoiceTTSWrapper(model, ref_audio, ref_text)
+        if voice_design_instruct:
+            log.info("OmniVoice voice-design mode (instruct=%r)", voice_design_instruct)
+            return _OmniVoiceDesignTTSWrapper(model, voice_design_instruct)
+        elif ref_audio:
+            log.info("OmniVoice voice clone configured from %s", ref_audio)
+            return _OmniVoiceTTSWrapper(model, ref_audio, ref_text)
+        else:
+            log.info("OmniVoice auto-voice mode (no reference audio)")
+            return _OmniVoiceAutoTTSWrapper(model)
     else:
         raise ValueError(f"Unknown TTS engine: {engine!r}")
 

@@ -212,7 +212,17 @@ class MazingerDubber:
             log.debug("YouTube subtitle download disabled (use_youtube_subs=False)")
 
         # -- Resolve voice (theme / profile / explicit sample+script) -----
-        if voice_theme and not (voice_sample and voice_script):
+        _omnivoice_instruct: str | None = None
+        if voice_theme and tts_engine == "omnivoice" and not (voice_sample and voice_script):
+            # OmniVoice has its own voice-design mode via ``instruct`` —
+            # no need to generate a Qwen reference clip.
+            from mazinger.profiles import get_theme_instruct
+            _omnivoice_instruct = get_theme_instruct(voice_theme, tts_language)
+            log.info(
+                "OmniVoice voice-design theme %s / %s -> instruct=%r",
+                voice_theme, tts_language, _omnivoice_instruct,
+            )
+        elif voice_theme and not (voice_sample and voice_script):
             from mazinger.profiles import generate_profile
             profile_dir = proj.voice_profile_dir
             profile_wav = os.path.join(profile_dir, "voice.wav")
@@ -226,7 +236,7 @@ class MazingerDubber:
                     device=device_for_tts, dtype=tts_dtype,
                 )
 
-        auto_clone = not voice_sample and not voice_script
+        auto_clone = not voice_sample and not voice_script and not _omnivoice_instruct
 
         if force_reset:
             skip_existing = False
@@ -237,8 +247,8 @@ class MazingerDubber:
 
         # -- Read voice script (deferred when auto-cloning) ---------------
         ref_text = None
-        if not auto_clone:
-            if os.path.isfile(voice_script):
+        if not auto_clone and not _omnivoice_instruct:
+            if voice_script and os.path.isfile(voice_script):
                 with open(voice_script, encoding="utf-8") as fh:
                     ref_text = fh.read().strip()
             else:
@@ -388,7 +398,10 @@ class MazingerDubber:
                     fh.write(source_srt_text)
 
         # -- Auto-clone voice from source audio ---------------------------
-        if auto_clone:
+        if auto_clone and tts_engine != "omnivoice":
+            # For Qwen/Chatterbox/MLX: extract a voice sample from the source
+            # audio to use as a cloning reference.
+            # OmniVoice has its own auto-voice mode and does not need this.
             from mazinger.profiles import create_auto_clone_profile
             profile_dir = proj.voice_profile_dir
             profile_wav = os.path.join(profile_dir, "voice.wav")
@@ -404,6 +417,8 @@ class MazingerDubber:
                 voice_sample = create_auto_clone_profile(
                     proj.audio, clone_srt, profile_dir,
                 )
+        elif auto_clone and tts_engine == "omnivoice":
+            log.info("OmniVoice auto-voice mode — skipping voice profile extraction")
 
         # 5. Translate ---------------------------------------------------
         if skip_existing and is_valid_srt_file(proj.translated_raw_srt):
@@ -476,6 +491,7 @@ class MazingerDubber:
             chatterbox_cfg=chatterbox_cfg,
             mlx_model=mlx_model,
             omnivoice_model=omnivoice_model,
+            voice_design_instruct=_omnivoice_instruct,
         )
         segment_info = tts.synthesize_segments(
             tts_model, voice_prompt, srt_entries, proj.tts_segments_dir,
