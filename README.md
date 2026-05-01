@@ -35,6 +35,9 @@ mazinger web --with-ollama --with-faster-whisper
 
 A local URL opens in your browser. Paste a video link, pick a voice, and click **Start**. The flags install a free local LLM (Ollama) and download the speech-recognition model on first run — no API keys required.
 
+> 💡 **No GPU?** Run it on a free Colab T4 in two clicks:
+> [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/bakrianoo/mazinger/blob/master/notebooks/mazinger_colab.ipynb)
+
 > Prefer the command line or Python? Skip ahead to [Common Tasks](#-common-tasks) or the [Python API](#-python-api).
 
 ---

@@ -715,3 +715,175 @@ def translate_srt(
         log.info("Translation complete: %d entries", translated_count)
 
     return result
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Simple per-segment translation (template-based, e.g. for `translategemma`)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Canonical language name → ISO 639-1 code.  Used by template-based
+# translators that expect explicit source/target codes.
+_LANG_TO_ISO_CODE: dict[str, str] = {
+    "Arabic": "ar", "Bengali": "bn",
+    "Chinese (Simplified)": "zh", "Chinese (Traditional)": "zh",
+    "Czech": "cs", "Danish": "da", "Dutch": "nl",
+    "English": "en", "Finnish": "fi", "French": "fr",
+    "German": "de", "Greek": "el", "Hebrew": "he",
+    "Hindi": "hi", "Hungarian": "hu", "Indonesian": "id",
+    "Italian": "it", "Japanese": "ja", "Korean": "ko",
+    "Malay": "ms", "Norwegian": "no", "Persian": "fa",
+    "Polish": "pl", "Portuguese": "pt", "Romanian": "ro",
+    "Russian": "ru", "Spanish": "es", "Swedish": "sv",
+    "Thai": "th", "Turkish": "tr", "Ukrainian": "uk",
+    "Urdu": "ur", "Vietnamese": "vi",
+}
+
+# Reverse: ISO code → canonical language name.  Whisper emits codes
+# (``en``, ``ar`` …) so we need this to translate the detected language
+# into a name the template can render.
+_ISO_CODE_TO_LANG: dict[str, str] = {}
+for _name, _code in _LANG_TO_ISO_CODE.items():
+    _ISO_CODE_TO_LANG.setdefault(_code, _name)
+
+
+def lang_name_from_code(code: str | None) -> str | None:
+    """Return the canonical language name for an ISO 639-1 *code*.
+
+    Returns ``None`` when *code* is empty or unknown.
+    """
+    if not code:
+        return None
+    return _ISO_CODE_TO_LANG.get(code.lower().split("-")[0])
+
+
+def lang_code_from_name(name: str) -> str:
+    """Return the ISO 639-1 code for a canonical language *name*.
+
+    Falls back to ``"en"`` if *name* is not in the map.
+    """
+    return _LANG_TO_ISO_CODE.get(name, "en")
+
+
+# User-facing translation template — kept in a constant so the same
+# wording the model was fine-tuned on is used at runtime.
+SIMPLE_TRANSLATION_TEMPLATE = (
+    "You are a professional {SOURCE_LANG} ({SOURCE_CODE}) to "
+    "{TARGET_LANG} ({TARGET_CODE}) translator. Your goal is to accurately "
+    "convey the meaning and nuances of the original {SOURCE_LANG} text "
+    "while adhering to {TARGET_LANG} grammar, vocabulary, and cultural "
+    "sensitivities.\n"
+    "Produce only the {TARGET_LANG} translation, without any additional "
+    "explanations or commentary. Please translate the following "
+    "{SOURCE_LANG} text into {TARGET_LANG}:\n\n\n"
+    "{TEXT}"
+)
+
+
+def _build_simple_prompt(
+    text: str, source_language: str, target_language: str,
+) -> str:
+    return SIMPLE_TRANSLATION_TEMPLATE.format(
+        SOURCE_LANG=source_language,
+        SOURCE_CODE=lang_code_from_name(source_language),
+        TARGET_LANG=target_language,
+        TARGET_CODE=lang_code_from_name(target_language),
+        TEXT=text,
+    )
+
+
+def _strip_simple_translation(reply: str) -> str:
+    """Clean up a raw translation reply.
+
+    Some chat-tuned translation models echo the prompt back, wrap the
+    answer in code fences, or prefix it with ``"Translation:"``. Strip
+    those common artifacts before returning.
+    """
+    text = reply.strip()
+    text = _CODE_FENCE_RE.sub("", text)
+    # Drop a leading "Translation:" / "Output:" label (case-insensitive).
+    text = re.sub(r"^\s*(translation|output|answer)\s*[:\-]\s*", "", text, flags=re.I)
+    # Some models repeat the source language name in the lead-in.
+    text = re.sub(
+        r"^\s*Here(?:'s| is) the [^\n:]+translation[^:]*:\s*", "",
+        text, flags=re.I,
+    )
+    return text.strip()
+
+
+def translate_srt_simple(
+    srt_text: str,
+    client: OpenAI,
+    *,
+    llm_model: str = "translategemma",
+    source_language: str = "auto",
+    target_language: str = "English",
+    usage_tracker: LLMUsageTracker | None = None,
+    temperature: float = 0.1,
+) -> str:
+    """Translate every SRT entry independently with a template prompt.
+
+    Designed for lightweight task-specific translation models such as
+    ``translategemma`` that expect a single-sentence prompt of the form
+    described in :data:`SIMPLE_TRANSLATION_TEMPLATE`.
+
+    Differs from :func:`translate_srt` in that it does **not** use
+    visual context, batching, or duration budgeting — each subtitle
+    block is translated on its own.  This is faster on small models
+    and avoids the JSON-formatting failure modes that weak LLMs hit
+    when asked to return structured arrays.
+
+    Parameters:
+        srt_text:         Source SRT string.
+        client:           Initialised OpenAI-compatible client.
+        llm_model:        Translation model name.
+        source_language:  Canonical language name (e.g. ``English``) or
+                          ``auto`` — when auto, defaults to ``English``.
+        target_language:  Canonical target language name.
+
+    Returns:
+        Translated SRT preserving the original timestamps.
+    """
+    src = source_language if source_language and source_language != "auto" else "English"
+    tgt = resolve_language(target_language)
+    src = resolve_language(src)
+
+    blocks = parse_blocks(srt_text)
+    log.info(
+        "Simple-translate %d entries via %s (%s → %s)",
+        len(blocks), llm_model, src, tgt,
+    )
+
+    translated: list[tuple[str, float, float, str]] = []
+    for idx, start, end, text in tqdm(blocks, desc="Translating"):
+        original = text.strip()
+        if not original:
+            translated.append((idx, start, end, original))
+            continue
+
+        prompt = _build_simple_prompt(original, src, tgt)
+        try:
+            resp = client.chat.completions.create(
+                model=llm_model,
+                temperature=temperature,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            if usage_tracker is not None:
+                usage_tracker.record("translate", llm_model, resp)
+            reply = resp.choices[0].message.content or ""
+        except Exception as exc:  # noqa: BLE001
+            log.warning(
+                "Simple translation failed for entry %s: %s — keeping original",
+                idx, exc,
+            )
+            translated.append((idx, start, end, original))
+            continue
+
+        cleaned = _strip_simple_translation(_clean_llm_text(reply))
+        if not cleaned:
+            log.warning(
+                "Empty translation for entry %s — keeping original", idx,
+            )
+            cleaned = original
+        translated.append((idx, start, end, cleaned))
+
+    return blocks_to_text(translated)

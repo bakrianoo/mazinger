@@ -60,6 +60,7 @@ class ProjectPaths:
         self.video_meta = os.path.join(self.source_dir, "video_meta.json")
         self.source_srt = os.path.join(self.transcription_dir, "source.srt")
         self.source_raw_srt = os.path.join(self.transcription_dir, "source.raw.srt")
+        self.source_lang = os.path.join(self.transcription_dir, "source.lang.txt")
         self.pre_validation_srt = os.path.join(self.transcription_dir, "source.PRE_VALIDATION.srt")
         self.thumbs_meta = os.path.join(self.thumbnails_dir, "meta.json")
         self.description = os.path.join(self.analysis_dir, "description.json")

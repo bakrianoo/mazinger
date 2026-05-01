@@ -1272,6 +1272,17 @@ def transcribe(
         fh.write(raw_srt_content)
     log.info("Raw SRT saved: %s (%d segments)", raw_srt_path, len(raw_segments))
 
+    # Save detected language alongside the SRT so downstream stages
+    # (translation, dubbing) can pick it up without re-running ASR.
+    if detected_lang and detected_lang != "unknown":
+        try:
+            lang_sidecar = f"{base}.lang.txt"
+            with open(lang_sidecar, "w", encoding="utf-8") as fh:
+                fh.write(detected_lang.strip())
+            log.info("Detected language saved: %s (%s)", lang_sidecar, detected_lang)
+        except OSError as exc:
+            log.warning("Could not save detected language sidecar: %s", exc)
+
     # Resegment for readability
     if skip_resegment:
         final_segments = raw_segments

@@ -1,5 +1,7 @@
 """Mazinger Studio — Gradio application entry point."""
 
+import os
+
 import gradio as gr
 
 from mazinger.studio.constants import (
@@ -293,6 +295,16 @@ with gr.Blocks(title="Mazinger Studio") as app:
                     label="Translate technical terms",
                     value=False,
                 )
+                use_translation_model = gr.Checkbox(
+                    label="Use dedicated translation model (translategemma)",
+                    value=bool(os.environ.get("MAZINGER_TRANSLATION_MODEL")),
+                    info=(
+                        "Translates each subtitle individually with the "
+                        "translategemma Ollama model.  Faster and often more "
+                        "accurate on small Ollama setups, but skips visual "
+                        "context and duration budgeting."
+                    ),
+                )
 
             with gr.Tab("🗣️ TTS"):
                 tts_engine = gr.Dropdown(
@@ -523,6 +535,20 @@ with gr.Blocks(title="Mazinger Studio") as app:
         [target_language],
     )
 
+    # ── Output language → auto-switch to OmniVoice if Qwen can't speak it ─
+    def _on_language_change(lang, engine):
+        # If the chosen language isn't supported by the current engine,
+        # switch the engine to one that does support it (OmniVoice covers
+        # everything Qwen does plus 14 extra languages).
+        if engine == "Qwen3-TTS" and lang not in QWEN_LANGUAGES:
+            return gr.update(value="OmniVoice")
+        return gr.update()
+
+    target_language.change(
+        _on_language_change, [target_language, tts_engine],
+        [tts_engine],
+    )
+
     # ── Wire everything ───────────────────────────────────────────
     run_btn.click(
         fn=run_dubbing,
@@ -536,6 +562,7 @@ with gr.Blocks(title="Mazinger Studio") as app:
             quality, start_time, end_time,
             transcribe_method, whisper_model,
             source_language, words_per_second, duration_budget, translate_technical,
+            use_translation_model,
             tts_engine,
             tts_dtype,
             tempo_mode, max_tempo, segment_mode, loudness_match, mix_background, background_volume,

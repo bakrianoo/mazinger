@@ -135,13 +135,22 @@ where = ["."]
 # cause a multi-GB downgrade that breaks the environment.
 # These overrides tell uv: "accept anything >= these floors" so the already-
 # installed CUDA-optimised builds are reused instead of being replaced.
+#
+# qwen-tts 0.1.1 hard-pins transformers==4.57.3 and accelerate==1.12.0,
+# which conflicts with omnivoice>=0.1.3 (requires transformers>=5.3.0).
+# We override both pins so qwen-tts and omnivoice can coexist on the
+# newer transformers/accelerate.  qwen-tts's Qwen3TTSModel uses mostly
+# generic HF APIs and works at runtime against transformers 5.x in our
+# tests; if upstream breaks compatibility, pin transformers manually.
 [tool.uv]
 override-dependencies = [
-    "numpy>=1.26",         # chatterbox pins numpy<1.26; conflicts with Python 3.12+
-    "pandas>=2.2",         # chatterbox pins old pandas; not needed for inference
-    "torch>=2.0",          # chatterbox pins torch==2.6.0; allow system CUDA build
-    "torchaudio>=2.0",     # chatterbox pins torchaudio==2.6.0; allow system CUDA build
-    "safetensors>=0.3",    # chatterbox pins safetensors==0.5.3; 0.7+ is backward-compat
+    "numpy>=1.26",            # chatterbox pins numpy<1.26; conflicts with Python 3.12+
+    "pandas>=2.2",            # chatterbox pins old pandas; not needed for inference
+    "torch>=2.0",             # chatterbox pins torch==2.6.0; allow system CUDA build
+    "torchaudio>=2.0",        # chatterbox pins torchaudio==2.6.0; allow system CUDA build
+    "safetensors>=0.3",       # chatterbox pins safetensors==0.5.3; 0.7+ is backward-compat
+    "transformers>=5.3.0",    # relax qwen-tts==4.57.3 pin to coexist with omnivoice>=0.1.3
+    "accelerate>=1.12.0",     # relax qwen-tts==1.12.0 pin (allow newer accelerate)
 ]
 
 # Build dependencies for packages with missing build requirements

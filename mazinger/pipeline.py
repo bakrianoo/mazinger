@@ -110,6 +110,7 @@ class MazingerDubber:
         asr_review: bool = False,
         keep_technical_english: bool = False,
         use_youtube_subs: bool = False,
+        translation_model: str | None = None,
         output_type: str = "audio",
         subtitle_style=None,
         subtitle_source: str = "translated",
@@ -425,6 +426,33 @@ class MazingerDubber:
             log.info("Skipping translation (file exists)")
             with open(proj.translated_raw_srt, encoding="utf-8") as fh:
                 translated_srt = fh.read()
+        elif translation_model:
+            # Dedicated per-segment translation model (e.g. translategemma).
+            # Read the language detected by Whisper from the sidecar so the
+            # template prompt carries an accurate source language.
+            detected_src = source_language
+            if (not detected_src or detected_src == "auto") and os.path.exists(proj.source_lang):
+                try:
+                    with open(proj.source_lang, encoding="utf-8") as fh:
+                        detected_code = fh.read().strip()
+                    detected_name = translate.lang_name_from_code(detected_code)
+                    if detected_name:
+                        detected_src = detected_name
+                        log.info(
+                            "Using Whisper-detected source language: %s (%s)",
+                            detected_name, detected_code,
+                        )
+                except OSError:
+                    pass
+            translated_srt = translate.translate_srt_simple(
+                source_srt_text, client,
+                llm_model=translation_model,
+                source_language=detected_src,
+                target_language=target_language,
+                usage_tracker=usage_tracker,
+            )
+            with open(proj.translated_raw_srt, "w", encoding="utf-8") as fh:
+                fh.write(translated_srt)
         else:
             translated_srt = translate.translate_srt(
                 source_srt_text, description, thumb_paths, client,
@@ -467,6 +495,21 @@ class MazingerDubber:
             )
             with open(proj.final_srt, "w", encoding="utf-8") as fh:
                 fh.write(resegmented)
+
+        # 6b. Safety net — absorb tiny tail segments into a neighbour.
+        # Runs every time (even when the SRT was reused from cache) so
+        # files produced before this fix get cleaned up automatically
+        # and TTS never receives a sub-second standalone segment.
+        try:
+            with open(proj.final_srt, encoding="utf-8") as fh:
+                _final_text = fh.read()
+            _cleaned = resegment.absorb_short_segments(_final_text)
+            if _cleaned != _final_text:
+                with open(proj.final_srt, "w", encoding="utf-8") as fh:
+                    fh.write(_cleaned)
+                log.info("Final SRT updated: short-segment merge applied")
+        except Exception as exc:  # noqa: BLE001 — never block the pipeline
+            log.warning("Short-segment merge skipped: %s", exc)
 
         if hasattr(client, 'unload_model'):
             client.unload_model(self.llm_model)

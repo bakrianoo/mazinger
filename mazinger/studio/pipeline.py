@@ -63,6 +63,44 @@ def _write_cookies(cookies_text):
     return None
 
 
+# Friendly message shown when yt-dlp asks for cookies. Points the user to
+# the in-app "🍪 YouTube Cookies" accordion and the step-by-step guide.
+_COOKIES_HELP_URL = (
+    "https://github.com/bakrianoo/mazinger/blob/master/docs/youtube-cookies.md"
+)
+_COOKIES_FRIENDLY_MSG = (
+    "🍪 YouTube needs your cookies to download this video.\n"
+    "\n"
+    "This usually means the video is age-restricted, region-locked, "
+    "members-only, or YouTube is asking the downloader to prove it isn't a bot.\n"
+    "\n"
+    "How to fix it:\n"
+    "  1. Open the “🍪 YouTube Cookies” panel above the language selector.\n"
+    "  2. Click “📖 How to get cookies” and follow the 3 steps "
+    "(install the Chrome extension → export cookies from youtube.com → paste them).\n"
+    "  3. Click Start again.\n"
+    "\n"
+    f"Detailed guide: {_COOKIES_HELP_URL}"
+)
+
+
+def _format_pipeline_error(exc: BaseException, prefix: str = "Pipeline failed") -> str:
+    """Render *exc* as a user-friendly status message.
+
+    Detects yt-dlp's "cookies required" family of errors and replaces the
+    raw stack-trace text with a clear instruction pointing the user to
+    the YouTube Cookies panel.
+    """
+    try:
+        from mazinger.download import is_cookies_required_error
+    except Exception:  # noqa: BLE001 — fail open: keep the raw error
+        is_cookies_required_error = lambda _e: False  # noqa: E731
+
+    if is_cookies_required_error(exc):
+        return "❌ " + _COOKIES_FRIENDLY_MSG
+    return f"❌ {prefix}: {exc}"
+
+
 def run_dubbing(
     source_type, url, uploaded_file,
     cookies_text,
@@ -73,6 +111,7 @@ def run_dubbing(
     quality, start_time, end_time,
     transcribe_method, whisper_model,
     source_language, words_per_second, duration_budget, translate_technical,
+    use_translation_model,
     tts_engine,
     tts_dtype,
     tempo_mode, max_tempo, segment_mode, loudness_match, mix_background, background_volume,
@@ -125,6 +164,7 @@ def run_dubbing(
             quality, start_time, end_time,
             transcribe_method, whisper_model,
             source_language, words_per_second, duration_budget, translate_technical,
+            use_translation_model,
             output_type, force_reset,
             stream_llm,
             youtube_subs,
@@ -140,6 +180,7 @@ def run_dubbing(
         quality, start_time, end_time,
         transcribe_method, whisper_model,
         source_language, words_per_second, duration_budget, translate_technical,
+        use_translation_model,
         tts_engine,
         tts_dtype,
         tempo_mode, max_tempo, segment_mode, loudness_match, mix_background, background_volume,
@@ -160,6 +201,7 @@ def _run_subtitles(
     quality, start_time, end_time,
     transcribe_method, whisper_model,
     source_language, words_per_second, duration_budget, translate_technical,
+    use_translation_model,
     output_type, force_reset,
     stream_llm,
     youtube_subs=False,
@@ -354,15 +396,40 @@ def _run_subtitles(
 
             # 5. Translate
             if not (skip and os.path.exists(proj.translated_raw_srt)):
-                translated = translate_srt(
-                    srt_text, description, thumb_paths, client,
-                    llm_model=_llm,
-                    source_language=source_language if source_language != "Auto-detect" else "auto",
-                    target_language=target_language,
-                    translate_technical_terms=translate_technical,
-                    **({"words_per_second": words_per_second} if words_per_second > 0 else {}),
-                    **({"duration_budget": duration_budget} if duration_budget != 0.85 else {}),
-                )
+                if use_translation_model:
+                    from mazinger.translate import (
+                        translate_srt_simple, lang_name_from_code,
+                    )
+                    detected_src = (
+                        source_language if source_language and source_language != "Auto-detect"
+                        else "auto"
+                    )
+                    if detected_src == "auto" and os.path.exists(proj.source_lang):
+                        try:
+                            with open(proj.source_lang, encoding="utf-8") as f:
+                                code = f.read().strip()
+                            name = lang_name_from_code(code)
+                            if name:
+                                detected_src = name
+                        except OSError:
+                            pass
+                    translated = translate_srt_simple(
+                        srt_text, client,
+                        llm_model=os.environ.get("MAZINGER_TRANSLATION_MODEL")
+                        or "translategemma",
+                        source_language=detected_src,
+                        target_language=target_language,
+                    )
+                else:
+                    translated = translate_srt(
+                        srt_text, description, thumb_paths, client,
+                        llm_model=_llm,
+                        source_language=source_language if source_language != "Auto-detect" else "auto",
+                        target_language=target_language,
+                        translate_technical_terms=translate_technical,
+                        **({"words_per_second": words_per_second} if words_per_second > 0 else {}),
+                        **({"duration_budget": duration_budget} if duration_budget != 0.85 else {}),
+                    )
                 with open(proj.translated_raw_srt, "w", encoding="utf-8") as f:
                     f.write(translated)
             else:
@@ -401,7 +468,7 @@ def _run_subtitles(
     maz_log.removeHandler(collector)
 
     if "error" in error_box:
-        yield f"❌ Pipeline failed: {error_box['error']}", collector.read(), _llm_text(), None, None, None
+        yield _format_pipeline_error(error_box["error"]), collector.read(), _llm_text(), None, None, None
         return
 
     srt_out = result.get("srt")
@@ -435,6 +502,7 @@ def _run_full_dub(
     quality, start_time, end_time,
     transcribe_method, whisper_model,
     source_language, words_per_second, duration_budget, translate_technical,
+    use_translation_model,
     tts_engine,
     tts_dtype,
     tempo_mode, max_tempo, segment_mode, loudness_match, mix_background, background_volume,
@@ -478,7 +546,7 @@ def _run_full_dub(
             voice_script_path = voice_script_text.strip()
     except Exception as exc:
         maz_log.removeHandler(collector)
-        yield f"❌ Voice profile error: {exc}", collector.read(), "", None, None, None
+        yield _format_pipeline_error(exc, prefix="Voice profile error"), collector.read(), "", None, None, None
         return
 
     result = {}
@@ -561,6 +629,12 @@ def _run_full_dub(
             if _seg_mode != "short":
                 dub_kw["segment_mode"] = _seg_mode
 
+            if use_translation_model:
+                dub_kw["translation_model"] = (
+                    os.environ.get("MAZINGER_TRANSLATION_MODEL")
+                    or "translategemma"
+                )
+
             paths = dubber.dub(**dub_kw)
             result["paths"] = paths
 
@@ -597,7 +671,7 @@ def _run_full_dub(
     maz_log.removeHandler(collector)
 
     if "error" in error_box:
-        yield f"❌ Pipeline failed: {error_box['error']}", collector.read(), _llm_text(), None, None, None
+        yield _format_pipeline_error(error_box["error"]), collector.read(), _llm_text(), None, None, None
         return
 
     paths = result.get("paths")

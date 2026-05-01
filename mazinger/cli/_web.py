@@ -29,6 +29,14 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         help="Ollama model to pull when --with-ollama is used (default: env OLLAMA_MODEL or qwen3.5:2b-q8_0).",
     )
     p.add_argument(
+        "--translation-model",
+        default="translategemma",
+        help=(
+            "Dedicated Ollama translation model to also pull when --with-ollama "
+            "is used. Set to an empty string to skip. Default: translategemma."
+        ),
+    )
+    p.add_argument(
         "--with-faster-whisper",
         action="store_true",
         default=False,
@@ -162,6 +170,38 @@ def _setup_ollama(model: str) -> None:
         log.warning("Warm-up failed: %s", exc)
 
 
+def _pull_ollama_model(model: str) -> bool:
+    """Pull an additional Ollama model after the server is up.
+
+    Returns ``True`` on success, ``False`` otherwise.  Assumes Ollama is
+    installed and the server is already running.
+    """
+    if not shutil.which("ollama"):
+        log.warning("Cannot pull %s — ollama is not installed", model)
+        return False
+    if not _ollama_is_running():
+        log.warning("Cannot pull %s — ollama server is not running", model)
+        return False
+
+    log.info("Pulling Ollama model: %s", model)
+    for attempt in range(1, 4):
+        result = subprocess.run(
+            ["ollama", "pull", model],
+            timeout=600, capture_output=True, text=True,
+        )
+        if result.returncode == 0:
+            log.info("Ollama model ready: %s", model)
+            return True
+        err = (result.stderr or result.stdout or "").strip()
+        log.warning("Pull attempt %d/3 failed for %s: %s", attempt, model, err)
+        time.sleep(3)
+
+    log.error(
+        "Ollama model pull failed after 3 attempts. Try: ollama pull %s", model,
+    )
+    return False
+
+
 def _setup_faster_whisper(model: str) -> None:
     """Pre-download a faster-whisper model from HuggingFace."""
     log.info("Downloading Faster Whisper model: %s …", model)
@@ -184,6 +224,11 @@ def handler(args: argparse.Namespace) -> None:
         )
         os.environ["OLLAMA_MODEL"] = model
         _setup_ollama(model)
+
+        translation_model = (args.translation_model or "").strip()
+        if translation_model and translation_model != model:
+            _pull_ollama_model(translation_model)
+            os.environ["MAZINGER_TRANSLATION_MODEL"] = translation_model
 
     if args.with_faster_whisper:
         _setup_faster_whisper(args.whisper_model)

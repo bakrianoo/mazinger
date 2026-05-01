@@ -346,6 +346,12 @@ class _MLXTTSWrapper(TTSWrapper):
 
 _OMNIVOICE_SAMPLE_RATE = 24_000
 
+# Maximum length of the audio reference passed back to OmniVoice when
+# locking the auto/design voice after the first segment.  OmniVoice
+# warns above 20 s and recommends 3–10 s; longer references OOM on
+# 16 GB GPUs (e.g. Colab T4) and degrade clone quality.
+_OMNIVOICE_LOCK_REF_SECONDS = 8.0
+
 
 def _load_omnivoice_model(
     model_name: str = DEFAULT_OMNIVOICE_MODEL,
@@ -393,6 +399,13 @@ def _load_omnivoice_model(
 
 
 class _OmniVoiceTTSWrapper(TTSWrapper):
+    """OmniVoice in voice-clone mode — clones the speaker from ``ref_audio``.
+
+    The reference audio is encoded into a reusable
+    :class:`VoiceClonePrompt` once on construction; every segment then
+    shares the *exact* same prompt, guaranteeing voice consistency and
+    avoiding the cost of re-encoding the reference for each call.
+    """
 
     engine = "omnivoice"
 
@@ -400,12 +413,16 @@ class _OmniVoiceTTSWrapper(TTSWrapper):
         self.model = model
         self.ref_audio = ref_audio
         self.ref_text = ref_text
+        # Build the prompt eagerly so the same encoded reference is shared
+        # across all segments.
+        self._voice_clone_prompt = model.create_voice_clone_prompt(
+            ref_audio=ref_audio, ref_text=ref_text,
+        )
 
     def synthesize(self, text: str, language: str = "English") -> tuple[np.ndarray, int]:
-        kw: dict[str, Any] = {"text": text, "ref_audio": self.ref_audio}
-        if self.ref_text:
-            kw["ref_text"] = self.ref_text
-        audio_list = self.model.generate(**kw)
+        audio_list = self.model.generate(
+            text=text, voice_clone_prompt=self._voice_clone_prompt,
+        )
         if not audio_list:
             raise RuntimeError(
                 f"OmniVoice generate() returned no results "
@@ -422,26 +439,97 @@ class _OmniVoiceTTSWrapper(TTSWrapper):
         log.info("OmniVoice model unloaded, GPU memory freed.")
 
 
+def _omnivoice_build_clone_prompt(
+    model: Any, audio: np.ndarray, ref_text: str,
+) -> Any:
+    """Build a reusable :class:`VoiceClonePrompt` from a generated waveform.
+
+    Used by the auto-voice and voice-design wrappers to *lock* the voice
+    after the first segment so every subsequent segment is cloned from the
+    exact same speaker.
+
+    The reference is trimmed to at most ``_OMNIVOICE_LOCK_REF_SECONDS`` of
+    audio.  OmniVoice itself warns that references longer than ~20 s
+    cause OOMs and degrade clone quality, and the model documentation
+    recommends 3–10 s — anything longer here only hurts.  Trimming the
+    *lock reference* does **not** affect the generated segment audio
+    returned to the caller; only the encoded prompt used to clone
+    subsequent segments is shortened.
+
+    When the audio is trimmed, the paired ``ref_text`` is also shortened
+    proportionally so the prompt's audio↔text alignment stays
+    reasonable.
+    """
+    import torch
+    max_samples = int(_OMNIVOICE_LOCK_REF_SECONDS * _OMNIVOICE_SAMPLE_RATE)
+    if audio.shape[-1] > max_samples:
+        ratio = max_samples / audio.shape[-1]
+        audio = audio[..., :max_samples]
+        words = ref_text.split()
+        if words:
+            keep = max(1, int(len(words) * ratio))
+            ref_text = " ".join(words[:keep])
+    waveform = torch.from_numpy(np.ascontiguousarray(audio))
+    return model.create_voice_clone_prompt(
+        ref_audio=(waveform, _OMNIVOICE_SAMPLE_RATE),
+        ref_text=ref_text,
+    )
+
+
 class _OmniVoiceAutoTTSWrapper(TTSWrapper):
-    """OmniVoice in auto-voice mode — the model picks a voice automatically."""
+    """OmniVoice in auto-voice mode — the model picks a voice automatically.
+
+    The model would otherwise sample a different random voice on every
+    :meth:`synthesize` call.  To keep all segments in a single voice we
+    let the model pick once on the first call, then build a reusable
+    voice-clone prompt from that output and use it for every subsequent
+    segment.
+    """
 
     engine = "omnivoice"
 
     def __init__(self, model: Any):
         self.model = model
+        self._voice_clone_prompt: Any = None
 
     def synthesize(self, text: str, language: str = "English") -> tuple[np.ndarray, int]:
-        audio_list = self.model.generate(text=text)
+        if self._voice_clone_prompt is not None:
+            audio_list = self.model.generate(
+                text=text, voice_clone_prompt=self._voice_clone_prompt,
+            )
+        else:
+            log.info(
+                "OmniVoice auto-voice: generating first segment to lock the voice"
+            )
+            audio_list = self.model.generate(text=text)
+
         if not audio_list:
             raise RuntimeError(
                 f"OmniVoice auto-voice generate() returned no results "
                 f"(text={text!r})"
             )
-        return audio_list[0], _OMNIVOICE_SAMPLE_RATE
+
+        audio = audio_list[0]
+        if self._voice_clone_prompt is None:
+            try:
+                self._voice_clone_prompt = _omnivoice_build_clone_prompt(
+                    self.model, audio, text,
+                )
+                log.info(
+                    "OmniVoice auto-voice: voice locked — subsequent segments "
+                    "will be cloned from segment 1"
+                )
+            except Exception as exc:  # noqa: BLE001
+                log.warning(
+                    "Failed to lock OmniVoice auto-voice (%s) — segments may "
+                    "use different voices", exc,
+                )
+        return audio, _OMNIVOICE_SAMPLE_RATE
 
     def unload(self) -> None:
         import torch
         _remove_from_cache(self.model)
+        self._voice_clone_prompt = None
         del self.model
         gc.collect()
         torch.cuda.empty_cache()
@@ -449,26 +537,63 @@ class _OmniVoiceAutoTTSWrapper(TTSWrapper):
 
 
 class _OmniVoiceDesignTTSWrapper(TTSWrapper):
-    """OmniVoice voice-design mode — voice controlled via instruct string."""
+    """OmniVoice voice-design mode — voice controlled via instruct string.
+
+    The ``instruct`` text only describes voice *characteristics* (gender,
+    pitch, accent, …); the model still samples a fresh random voice
+    matching that description on every :meth:`generate` call.  To keep
+    all segments in a single voice we generate the first segment with
+    the instruct, then lock the voice by building a reusable
+    voice-clone prompt from that output and use it for every subsequent
+    segment.
+    """
 
     engine = "omnivoice"
 
     def __init__(self, model: Any, instruct: str):
         self.model = model
         self.instruct = instruct
+        self._voice_clone_prompt: Any = None
 
     def synthesize(self, text: str, language: str = "English") -> tuple[np.ndarray, int]:
-        audio_list = self.model.generate(text=text, instruct=self.instruct)
+        if self._voice_clone_prompt is not None:
+            audio_list = self.model.generate(
+                text=text, voice_clone_prompt=self._voice_clone_prompt,
+            )
+        else:
+            log.info(
+                "OmniVoice voice-design: generating first segment with "
+                "instruct=%r to lock the voice", self.instruct,
+            )
+            audio_list = self.model.generate(text=text, instruct=self.instruct)
+
         if not audio_list:
             raise RuntimeError(
                 f"OmniVoice voice-design generate() returned no results "
                 f"(text={text!r}, instruct={self.instruct!r})"
             )
-        return audio_list[0], _OMNIVOICE_SAMPLE_RATE
+
+        audio = audio_list[0]
+        if self._voice_clone_prompt is None:
+            try:
+                self._voice_clone_prompt = _omnivoice_build_clone_prompt(
+                    self.model, audio, text,
+                )
+                log.info(
+                    "OmniVoice voice-design: voice locked — subsequent "
+                    "segments will be cloned from segment 1"
+                )
+            except Exception as exc:  # noqa: BLE001
+                log.warning(
+                    "Failed to lock OmniVoice voice-design voice (%s) — "
+                    "segments may use different voices", exc,
+                )
+        return audio, _OMNIVOICE_SAMPLE_RATE
 
     def unload(self) -> None:
         import torch
         _remove_from_cache(self.model)
+        self._voice_clone_prompt = None
         del self.model
         gc.collect()
         torch.cuda.empty_cache()
