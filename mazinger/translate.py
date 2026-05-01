@@ -810,6 +810,121 @@ def _strip_simple_translation(reply: str) -> str:
     return text.strip()
 
 
+# Maximum source-block duration before pre-splitting kicks in for the
+# simple-template translator.  Without splitting, a 30 s source line can
+# expand to a 60–90 s translation that the assembler would have to trim
+# (the simple path has no per-segment word budgeting).  Splitting at
+# sentence boundaries first keeps each block within a slot the
+# assembler can realistically fit.
+_SIMPLE_MAX_BLOCK_SEC = 12.0
+_SIMPLE_MIN_SUBBLOCK_SEC = 2.5
+
+# Sentence-terminator characters that we will split on, in priority
+# order.  Includes Latin, Arabic (؟ ،), CJK (。！？), Devanagari (।)
+# punctuation so the splitter behaves on multilingual input.
+_SENTENCE_BOUNDARY_RE = re.compile(
+    r"(?<=[\.!\?。！？؟।])\s+(?=\S)"
+)
+_CLAUSE_BOUNDARY_RE = re.compile(
+    r"(?<=[,;:،؛])\s+(?=\S)"
+)
+
+
+def _split_text_for_duration(text: str, max_pieces: int) -> list[str]:
+    """Split *text* into at most *max_pieces* readable chunks.
+
+    Tries sentence boundaries first, then clause boundaries, then word
+    boundaries — preferring natural breaks over fixed character counts
+    so each chunk is independently translatable.
+    """
+    if max_pieces <= 1 or not text.strip():
+        return [text]
+
+    parts = _SENTENCE_BOUNDARY_RE.split(text)
+    if len(parts) >= 2:
+        return _balance_pieces(parts, max_pieces)
+
+    parts = _CLAUSE_BOUNDARY_RE.split(text)
+    if len(parts) >= 2:
+        return _balance_pieces(parts, max_pieces)
+
+    # Word-level fallback: cut into roughly equal piles of words.
+    words = text.split()
+    if len(words) < max_pieces:
+        return [text]
+    chunk = max(1, len(words) // max_pieces)
+    return [
+        " ".join(words[i:i + chunk]) for i in range(0, len(words), chunk)
+    ]
+
+
+def _balance_pieces(parts: list[str], max_pieces: int) -> list[str]:
+    """Greedily merge adjacent *parts* until at most *max_pieces* remain.
+
+    Targets evenly-sized pieces by repeatedly merging the smallest
+    adjacent pair — this avoids the degenerate "one giant + many tiny"
+    output that naive truncation produces.
+    """
+    pieces = [p.strip() for p in parts if p.strip()]
+    while len(pieces) > max_pieces:
+        # Find the smallest adjacent pair (by combined length).
+        sizes = [len(pieces[i]) + len(pieces[i + 1]) for i in range(len(pieces) - 1)]
+        i = int(min(range(len(sizes)), key=lambda k: sizes[k]))
+        pieces[i:i + 2] = [pieces[i] + " " + pieces[i + 1]]
+    return pieces
+
+
+def _presplit_blocks_for_simple(
+    blocks: list[tuple[str, float, float, str]],
+    max_block_sec: float = _SIMPLE_MAX_BLOCK_SEC,
+    min_subblock_sec: float = _SIMPLE_MIN_SUBBLOCK_SEC,
+) -> tuple[list[tuple[str, float, float, str]], int]:
+    """Split overly-long source blocks before per-segment translation.
+
+    Each block longer than *max_block_sec* is broken into N sub-blocks
+    where ``N = ceil(duration / max_block_sec)``.  Sub-block timings are
+    distributed proportionally to text length so dense passages keep
+    more time than short tails.  Sub-block IDs are suffixed (e.g.
+    ``"7a"``, ``"7b"``) to remain unique without colliding with
+    original numeric IDs.
+
+    Returns a tuple of ``(new_blocks, n_split)`` where *n_split* is the
+    number of original blocks that were split (for logging).
+    """
+    out: list[tuple[str, float, float, str]] = []
+    n_split = 0
+    for idx, start, end, text in blocks:
+        dur = end - start
+        if dur <= max_block_sec:
+            out.append((idx, start, end, text))
+            continue
+
+        # How many sub-blocks?  Use ceil so even a tiny excess triggers
+        # an extra piece (e.g. 13 s / 12 s → 2 pieces, not 1).  Cap so
+        # each piece stays above the readable minimum.
+        import math
+        n_pieces = max(2, math.ceil(dur / max_block_sec))
+        n_pieces = min(n_pieces, max(2, int(dur // min_subblock_sec)))
+
+        pieces = _split_text_for_duration(text, n_pieces)
+        if len(pieces) < 2:
+            out.append((idx, start, end, text))
+            continue
+
+        # Distribute time proportionally to character count.
+        lengths = [max(1, len(p)) for p in pieces]
+        total = sum(lengths)
+        cursor = start
+        for i, piece in enumerate(pieces):
+            share = dur * (lengths[i] / total)
+            piece_end = end if i == len(pieces) - 1 else cursor + share
+            sub_idx = f"{idx}{chr(ord('a') + i)}" if len(pieces) <= 26 else f"{idx}.{i + 1}"
+            out.append((sub_idx, cursor, piece_end, piece))
+            cursor = piece_end
+        n_split += 1
+    return out, n_split
+
+
 def translate_srt_simple(
     srt_text: str,
     client: OpenAI,
@@ -819,6 +934,7 @@ def translate_srt_simple(
     target_language: str = "English",
     usage_tracker: LLMUsageTracker | None = None,
     temperature: float = 0.1,
+    max_block_sec: float = _SIMPLE_MAX_BLOCK_SEC,
 ) -> str:
     """Translate every SRT entry independently with a template prompt.
 
@@ -832,6 +948,12 @@ def translate_srt_simple(
     and avoids the JSON-formatting failure modes that weak LLMs hit
     when asked to return structured arrays.
 
+    Source blocks longer than *max_block_sec* are pre-split on
+    sentence/clause boundaries before translation so the assembler can
+    fit each translated chunk into a realistic time slot — this
+    prevents the "85 s of audio in a 29 s slot" failure mode that
+    happens when a small translation model expands a long input.
+
     Parameters:
         srt_text:         Source SRT string.
         client:           Initialised OpenAI-compatible client.
@@ -839,15 +961,26 @@ def translate_srt_simple(
         source_language:  Canonical language name (e.g. ``English``) or
                           ``auto`` — when auto, defaults to ``English``.
         target_language:  Canonical target language name.
+        max_block_sec:    Source blocks longer than this (seconds) are
+                          pre-split on sentence boundaries.
 
     Returns:
-        Translated SRT preserving the original timestamps.
+        Translated SRT preserving the original timestamps (sub-block
+        boundaries inserted where pre-splitting was applied).
     """
     src = source_language if source_language and source_language != "auto" else "English"
     tgt = resolve_language(target_language)
     src = resolve_language(src)
 
-    blocks = parse_blocks(srt_text)
+    raw_blocks = parse_blocks(srt_text)
+    blocks, n_split = _presplit_blocks_for_simple(
+        raw_blocks, max_block_sec=max_block_sec,
+    )
+    if n_split:
+        log.info(
+            "Pre-split %d source blocks > %.1fs → %d total entries",
+            n_split, max_block_sec, len(blocks),
+        )
     log.info(
         "Simple-translate %d entries via %s (%s → %s)",
         len(blocks), llm_model, src, tgt,
@@ -886,4 +1019,11 @@ def translate_srt_simple(
             cleaned = original
         translated.append((idx, start, end, cleaned))
 
-    return blocks_to_text(translated)
+    # Renumber sequentially — pre-splitting may have produced
+    # non-numeric IDs (e.g. ``"7a"``, ``"7b"``) that downstream tools
+    # expecting plain integer SRT indices would reject.
+    renumbered = [
+        (str(i), start, end, text)
+        for i, (_idx, start, end, text) in enumerate(translated, 1)
+    ]
+    return blocks_to_text(renumbered)
