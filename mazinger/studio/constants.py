@@ -70,8 +70,9 @@ for _group_items in VOICE_THEMES.values():
 QUALITY_MAP = {"Low (360p)": "low", "Medium (720p)": "medium", "High (best)": "high"}
 
 METHOD_MAP = {
-    "OpenAI Whisper (cloud)": "openai",
     "Faster Whisper (local GPU)": "faster-whisper",
+    "Deepgram Nova 3 (cloud)": "deepgram",
+    "OpenAI Whisper (cloud)": "openai",
     "WhisperX (local GPU)": "whisperx",
 }
 

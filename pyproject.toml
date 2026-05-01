@@ -91,6 +91,19 @@ all-chatterbox = [
 all-omnivoice = [
     "mazinger[transcribe-faster,tts-omnivoice,audio-enhance]",
 ]
+# Default recommended bundle — everything needed to run the full Mazinger
+# pipeline and the Studio web UI:
+#   • Faster Whisper (local GPU transcription, default)
+#   • Deepgram Nova 3 (cloud transcription, no GPU required)
+#   • Qwen3-TTS  (voice-cloned synthesis with reference audio + transcript)
+#   • OmniVoice  (24 languages, zero-shot voice cloning)
+#   • Demucs     (background-audio separation for mixing)
+#   • Gradio     (Mazinger Studio web UI)
+# Compatible in a single environment.  Excludes Chatterbox and MLX (which
+# require dedicated environments — see docs/installation.md).
+all = [
+    "mazinger[transcribe-faster,transcribe-deepgram,tts,tts-omnivoice,audio-enhance,web]",
+]
 # TTS with MLX Qwen3-TTS for Apple Silicon
 tts-mlx = [
     "mlx-audio>=0.4.2",

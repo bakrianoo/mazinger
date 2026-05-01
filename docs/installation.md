@@ -1,8 +1,35 @@
 # Installation
 
-## Core Install
+## Recommended Install (Default)
 
-The base package covers video download, cloud transcription (OpenAI Whisper API), thumbnail extraction, content description, translation, re-segmentation, and subtitle embedding. No GPU required.
+One command installs everything needed to run the full Mazinger pipeline and the Studio web UI:
+
+```bash
+pip install "mazinger[all]"
+```
+
+This bundles a single, mutually-compatible set of engines:
+
+| Component | Purpose |
+|-----------|---------|
+| `faster-whisper` | Local GPU transcription (default) |
+| `deepgram-sdk` | Cloud transcription via Deepgram Nova 3 ($200 free credit, no GPU) |
+| `qwen-tts` | Voice-cloned TTS (reference audio + transcript) |
+| `omnivoice` | 24-language zero-shot voice cloning TTS |
+| `demucs` | Background-audio separation for clean voice mixing |
+| `gradio` | Mazinger Studio web UI |
+
+After installing, launch the Studio:
+
+```bash
+mazinger web --with-ollama --with-faster-whisper
+```
+
+> **Compatibility:** Chatterbox and MLX TTS pull conflicting `transformers` / platform requirements and are **not** included in `[all]`. Use the dedicated bundles below if you need them.
+
+## Core-Only Install
+
+If you only need download, cloud transcription (OpenAI Whisper API), thumbnails, description, translation, re-segmentation, and subtitle embedding — and want the smallest possible footprint — install the core package without extras:
 
 ```bash
 pip install mazinger
@@ -10,7 +37,9 @@ pip install mazinger
 
 Core dependencies: `yt-dlp`, `openai`, `json-repair`, `Pillow`, `soundfile`, `numpy`, `tqdm`.
 
-## Optional Extras
+## Advanced / Alternative Extras
+
+The extras below are for users who need an engine **not** included in `[all]`, or who want to install a smaller subset.
 
 ### Local Transcription
 
@@ -45,11 +74,13 @@ pip install "mazinger[tts-mlx]"                # MLX Qwen3-TTS — Apple Silicon
 pip install "mazinger[transcribe-mlx]"         # MLX Whisper — Apple Silicon
 ```
 
-### Full Bundles
+### Alternative Full Bundles
+
+Use these only if `[all]` doesn't fit your environment (e.g. you need Chatterbox, or you're on Apple Silicon).
 
 ```bash
 pip install "mazinger[all-qwen]"              # faster-whisper + Qwen3-TTS
-pip install "mazinger[all-chatterbox]"        # faster-whisper + Chatterbox
+pip install "mazinger[all-chatterbox]"        # faster-whisper + Chatterbox (separate env required)
 pip install "mazinger[all-omnivoice]"         # faster-whisper + OmniVoice (24 languages)
 pip install "mazinger[all-mlx]"               # MLX Whisper + MLX Qwen3-TTS (Apple Silicon only)
 ```

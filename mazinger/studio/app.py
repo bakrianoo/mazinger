@@ -358,11 +358,11 @@ with gr.Blocks(title="Mazinger Studio") as app:
                     list(METHOD_MAP.keys()),
                     value="Faster Whisper (local GPU)",
                     label="Transcription method",
-                    info="Cloud = needs OpenAI key  •  Local = faster, requires GPU",
+                    info="Faster Whisper = local GPU (default)  •  Deepgram = cloud (set DEEPGRAM_API_KEY)  •  OpenAI = cloud (uses your OpenAI key)",
                 )
                 whisper_model = gr.Textbox(
                     label="Model override",
-                    placeholder="whisper-1 (cloud) / large-v3 (local)",
+                    placeholder="large-v3 (local) / whisper-1 (OpenAI) / nova-3 (Deepgram)",
                 )
                 youtube_subs = gr.Checkbox(
                     label="Use YouTube subtitles",
