@@ -20,7 +20,7 @@
 Mazinger chains ten stages into a single pipeline:
 
 1. **Download** — fetch a video from a URL or ingest a local file, extract the audio track
-2. **Transcribe** — convert speech to SRT subtitles (OpenAI Whisper API, faster-whisper, WhisperX, MLX Whisper, or Deepgram Nova 3)
+2. **Transcribe** — convert speech to SRT subtitles (OpenAI Whisper API, faster-whisper, WhisperX, MLX Whisper, Deepgram Nova 3, or Moonshine)
 3. **Thumbnails** — use an LLM to pick key frames from the video for visual context
 4. **Describe** — analyze the transcript and thumbnails to produce a structured summary (title, key points, keywords)
 5. **Review** — optionally refine ASR output: fix typos, reshape punctuation, and convert technical terms to English
@@ -54,6 +54,7 @@ Add local transcription or TTS as optional extras:
 # Local transcription
 pip install "mazinger[transcribe-faster]"      # faster-whisper (default, recommended)
 pip install "mazinger[transcribe-whisperx]"    # WhisperX (optional, word-level alignment)
+pip install "mazinger[transcribe-moonshine]"   # Moonshine — small, CPU-friendly, Arabic-tuned variant
 
 # Cloud transcription (no GPU needed)
 pip install "mazinger[transcribe-deepgram]"    # Deepgram Nova 3 (cloud, free $200 credit)
@@ -175,6 +176,32 @@ mazinger dub "https://youtube.com/watch?v=VIDEO_ID" \
     --voice-theme narrator-m \
     --target-language English
 ```
+
+### Local CPU transcription with Moonshine (free, no GPU, Arabic-tuned)
+
+[Moonshine](https://github.com/moonshine-ai/moonshine) is a small (27–61 M
+param) ASR model from Useful Sensors. The Arabic-specialised
+[`moonshine-tiny-ar`](https://huggingface.co/UsefulSensors/moonshine-tiny-ar)
+variant matches `whisper-medium` on Arabic Fleurs/CommonVoice at **28× fewer
+parameters**, runs comfortably on CPU, and is fully open-source.
+
+```bash
+pip install "mazinger[transcribe-moonshine]"
+
+# Arabic — picks moonshine-tiny-ar by default
+mazinger transcribe audio.mp3 --method moonshine --language ar -o subs.srt
+
+# English — picks moonshine-base by default
+mazinger transcribe audio.mp3 --method moonshine --language en -o subs.srt
+
+# Override the model id explicitly (any Moonshine HF checkpoint works)
+mazinger transcribe audio.mp3 --method moonshine \
+    --model UsefulSensors/moonshine-tiny-ar -o subs.srt
+```
+
+The pipeline VAD-chunks long audio into ≤25 s segments before each
+transcription call and applies a 13-tokens/sec hallucination guard from the
+model card.
 
 ### Python API
 

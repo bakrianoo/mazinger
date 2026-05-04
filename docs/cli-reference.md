@@ -37,7 +37,7 @@ mazinger dub <source> [options]
 | `--voice-theme` | — | Pre-defined voice theme (e.g. `narrator-m`, `warm-f`). See `mazinger profile list` |
 | `--voice-sample` | — | Path to reference voice audio file |
 | `--voice-script` | — | Path to transcript of the voice sample (or inline text) |
-| `--transcribe-method` | `faster-whisper` | `openai`, `faster-whisper`, `whisperx`, `mlx-whisper`, or `deepgram` |
+| `--transcribe-method` | `faster-whisper` | `openai`, `faster-whisper`, `whisperx`, `mlx-whisper`, `deepgram`, or `moonshine` |
 | `--whisper-model` | varies by method | Whisper/Deepgram model name |
 | `--mlx-whisper-model` | `mlx-community/whisper-large-v3-turbo` | MLX Whisper model name |
 | `--beam-size` | — | Beam size for decoding (faster-whisper/whisperx) |
@@ -186,7 +186,7 @@ If `source` is provided, the video is downloaded first and its audio is transcri
 |------|---------|-------------|
 | `--audio` | — | Path to audio file (overrides source) |
 | `-o`, `--output` | — | Output SRT path |
-| `--method` | `faster-whisper` | `openai`, `faster-whisper`, `whisperx`, `mlx-whisper`, or `deepgram` |
+| `--method` | `faster-whisper` | `openai`, `faster-whisper`, `whisperx`, `mlx-whisper`, `deepgram`, or `moonshine` |
 | `--model` | varies | Model name (`whisper-1` for OpenAI, `large-v3` for local, `nova-3` for Deepgram) |
 | `--device` | `auto` | `auto`, `cuda`, `cpu` |
 | `--batch-size` | `16` | Batch size for local transcription |
@@ -219,6 +219,10 @@ mazinger transcribe --audio recording.mp3 -o subs.srt \
 # Local with faster-whisper on GPU
 mazinger transcribe --audio recording.mp3 -o subs.srt \
     --method faster-whisper --device cuda
+
+# Local with Moonshine on CPU (Arabic-tuned variant chosen automatically)
+mazinger transcribe --audio recording.mp3 -o subs.srt \
+    --method moonshine --language ar --device cpu
 
 # From a URL, auto-download first
 mazinger transcribe "https://youtube.com/watch?v=abc123" --base-dir ./output

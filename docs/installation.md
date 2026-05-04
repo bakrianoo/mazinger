@@ -17,9 +17,14 @@ Core dependencies: `yt-dlp`, `openai`, `json-repair`, `Pillow`, `soundfile`, `nu
 ```bash
 pip install "mazinger[transcribe-faster]"      # faster-whisper — CTranslate2, ~4× faster than Whisper
 pip install "mazinger[transcribe-whisperx]"    # WhisperX — best word-level alignment via wav2vec2
+pip install "mazinger[transcribe-moonshine]"   # Moonshine — small, CPU-friendly, Arabic-tuned variant
 ```
 
-Both require a CUDA GPU (or can fall back to CPU at reduced speed).
+`faster-whisper` and `whisperx` both prefer a CUDA GPU (CPU fallback works
+but is slower). `moonshine` is designed to run well on CPU — it's the
+lightest local ASR option and ships an Arabic-specialised checkpoint
+(`moonshine-tiny-ar`) that matches `whisper-medium` quality at 28× fewer
+parameters.
 
 ### Cloud Transcription (no GPU required)
 
@@ -75,6 +80,7 @@ WhisperX requires `transformers>=4.48`, so it conflicts with Chatterbox. When us
 | Transcribe (local) | `mazinger transcribe --method faster-whisper` | no | `transcribe-faster` + CUDA |
 | Transcribe (local) | `mazinger transcribe --method whisperx` | no | `transcribe-whisperx` + CUDA |
 | Transcribe (MLX) | `mazinger transcribe --method mlx-whisper` | no | `transcribe-mlx` + Apple Silicon |
+| Transcribe (Moonshine) | `mazinger transcribe --method moonshine` | no | `transcribe-moonshine` (CPU-friendly, Arabic-tuned variant) |
 | Thumbnails | `mazinger thumbnails` | yes | — |
 | Describe | `mazinger describe` | yes | — |
 | Translate | `mazinger translate` | yes | — |

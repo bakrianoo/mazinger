@@ -17,11 +17,14 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     p.add_argument("-o", "--output", default=None,
                    help="Output SRT path (default: project transcription/source.srt).")
     p.add_argument("--method", default="faster-whisper",
-                   choices=["openai", "faster-whisper", "whisperx", "mlx-whisper", "deepgram"],
+                   choices=["openai", "faster-whisper", "whisperx", "mlx-whisper",
+                            "deepgram", "moonshine"],
                    help="Transcription backend.")
     p.add_argument("--model", default=None,
                    help="Model name. Defaults to 'whisper-1' for OpenAI, "
-                        "'large-v3' for local, 'nova-3' for Deepgram.")
+                        "'large-v3' for local, 'nova-3' for Deepgram, "
+                        "'moonshine-tiny-ar' for Moonshine + Arabic, "
+                        "'moonshine-base' for Moonshine otherwise.")
     p.add_argument("--mlx-whisper-model", default=DEFAULT_MLX_WHISPER_MODEL,
                    help=f"MLX Whisper model name (default: {DEFAULT_MLX_WHISPER_MODEL}).")
     p.add_argument("--device", default="auto", help="Device: auto (default), cuda, or cpu.")
