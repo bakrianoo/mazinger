@@ -42,6 +42,15 @@ transcribe-whisperx = [
 transcribe-deepgram = [
     "deepgram-sdk>=6.0",
 ]
+# Local transcription with Moonshine (Useful Sensors) — small, CPU-friendly,
+# with an Arabic-tuned variant that matches whisper-medium quality at 28x
+# fewer params.  Pulls transformers — not compatible with tts-chatterbox.
+transcribe-moonshine = [
+    "transformers>=4.49",
+    "torch>=2.4",
+    "silero-vad>=5.0",
+    "soundfile>=0.12",
+]
 # Alias for convenience (points to faster-whisper)
 transcribe = [
     "mazinger[transcribe-faster]",

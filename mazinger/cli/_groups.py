@@ -227,11 +227,14 @@ def add_segment_mode(p: argparse.ArgumentParser) -> None:
 def add_transcription(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--transcribe-method", default="faster-whisper",
-        choices=["openai", "faster-whisper", "whisperx", "mlx-whisper", "deepgram"],
+        choices=["openai", "faster-whisper", "whisperx", "mlx-whisper",
+                 "deepgram", "moonshine"],
         help="Transcription backend: 'faster-whisper' (default), 'openai', 'whisperx', "
-             "'mlx-whisper' (Apple Silicon), or 'deepgram' (cloud).",
+             "'mlx-whisper' (Apple Silicon), 'deepgram' (cloud), or "
+             "'moonshine' (CPU-friendly, Arabic-tuned variant available).",
     )
-    p.add_argument("--whisper-model", default=None, help="Whisper/Deepgram model name.")
+    p.add_argument("--whisper-model", default=None,
+                   help="Model name override (Whisper/Deepgram/Moonshine).")
     p.add_argument("--mlx-whisper-model", default=DEFAULT_MLX_WHISPER_MODEL,
                    help=f"MLX Whisper model name (default: {DEFAULT_MLX_WHISPER_MODEL}).")
     p.add_argument(

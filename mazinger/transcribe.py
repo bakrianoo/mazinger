@@ -1,6 +1,6 @@
-"""Transcribe audio to SRT using OpenAI Whisper, faster-whisper, WhisperX, MLX Whisper, or Deepgram.
+"""Transcribe audio to SRT using OpenAI Whisper, faster-whisper, WhisperX, MLX Whisper, Deepgram, or Moonshine.
 
-Supports five transcription backends:
+Supports six transcription backends:
 - **openai** (default): Uses OpenAI's Whisper API. No local GPU required,
   simple setup, works with any transformers version. Requires OPENAI_API_KEY.
 - **faster-whisper**: Fast local transcription using CTranslate2. 4x faster
@@ -14,6 +14,10 @@ Supports five transcription backends:
 - **deepgram**: Uses Deepgram's Nova API for fast, accurate cloud
   transcription with word-level timestamps. Supports 47+ languages.
   Requires DEEPGRAM_API_KEY. Requires [transcribe-deepgram] extra.
+- **moonshine**: Lightweight local CPU-friendly ASR from Useful Sensors.
+  ~5x faster than Whisper at similar quality. The Arabic-tuned variant
+  (``moonshine-tiny-ar``) matches whisper-medium on Arabic at 28x fewer
+  params. Requires [transcribe-moonshine] extra.
 """
 
 from __future__ import annotations
@@ -27,7 +31,7 @@ from typing import Any, Literal
 log = logging.getLogger(__name__)
 
 # Supported transcription methods
-TranscribeMethod = Literal["openai", "faster-whisper", "whisperx", "mlx-whisper", "deepgram"]
+TranscribeMethod = Literal["openai", "faster-whisper", "whisperx", "mlx-whisper", "deepgram", "moonshine"]
 
 # Module-level cache for faster-whisper models — avoids reloading across runs
 _whisper_cache: dict[str, Any] = {}
@@ -119,8 +123,17 @@ _PHANTOM_PATTERNS = [
 # Character repeated 3+ times consecutively → collapse to single occurrence
 _REPEATED_CHAR_RE = re.compile(r"(.)\1{2,}")
 
-# Same word repeated 3+ times consecutively → keep one
+# Same word repeated 3+ times consecutively → keep one.
 _REPEATED_WORD_RE = re.compile(r"\b(\S+)(?:\s+\1){2,}\b")
+
+# Same multi-word phrase repeated 3+ times consecutively, separated by
+# punctuation (Latin or Arabic) → keep one occurrence.
+# Catches stuck-token loops like "كما قلت، كما قلت، كما قلت" that Moonshine
+# and Whisper both emit on near-silent / out-of-distribution audio.
+_REPEATED_PHRASE_RE = re.compile(
+    r"((?:\b\S+\b[ \t]*){1,5}?)"          # phrase: 1–5 words
+    r"(?:[.,;:!?،؛؟]+[ \t]*\1){2,}"        # repeated 2+ more times after punct
+)
 
 
 def _clean_text(text: str) -> str:
@@ -134,6 +147,10 @@ def _clean_text(text: str) -> str:
 
     # Collapse words repeated 3+ times (e.g. كذا كذا كذا كذا → كذا)
     text = _REPEATED_WORD_RE.sub(r"\1", text)
+
+    # Collapse punctuation-separated phrase repeats (Moonshine/Whisper
+    # stuck-token loops, e.g. "كما قلت، كما قلت، كما قلت" → "كما قلت")
+    text = _REPEATED_PHRASE_RE.sub(r"\1", text)
 
     # Normalize whitespace
     text = re.sub(r"\s{2,}", " ", text).strip()
@@ -1006,6 +1023,164 @@ def _transcribe_deepgram(
     return raw_segments, detected_lang
 
 
+# ── Moonshine ASR backend (CPU-friendly, Arabic-tuned variant available) ─────
+
+# Per-language default Moonshine checkpoints on the HF Hub.  The "tiny-XX"
+# variants are language-specialised (~27 M params each); "base" is the
+# stronger English-only general model (~61 M params).  Users can always
+# override via ``model="UsefulSensors/..."``.
+_MOONSHINE_LANG_MODELS: dict[str, str] = {
+    "ar": "UsefulSensors/moonshine-tiny-ar",
+    "en": "UsefulSensors/moonshine-base",
+}
+_MOONSHINE_DEFAULT_MODEL = "UsefulSensors/moonshine-base"
+
+# Moonshine was trained on ≤30 s clips and has no native long-form chunker,
+# so we VAD-chunk audio ourselves before each generate() call.
+_MOONSHINE_MAX_CHUNK_S = 25.0
+# The model card recommends capping output length at ~13 tokens/sec of input
+# to suppress hallucinations on near-silent or very short chunks.
+_MOONSHINE_TOKENS_PER_SEC = 13
+
+
+def _moonshine_default_model(language: str | None) -> str:
+    """Pick a sensible Moonshine HF id given a language hint."""
+    if language:
+        key = language.lower().split("-")[0]
+        if key in _MOONSHINE_LANG_MODELS:
+            return _MOONSHINE_LANG_MODELS[key]
+    return _MOONSHINE_DEFAULT_MODEL
+
+
+def _moonshine_vad_chunks(audio_path: str, sampling_rate: int) -> tuple[Any, list[dict]]:
+    """Run Silero VAD and return (audio_tensor, list of speech chunks).
+
+    Each chunk is a dict ``{"start": <samples>, "end": <samples>}``.
+    Falls back to a single full-audio chunk if VAD finds no speech.
+    """
+    from silero_vad import load_silero_vad, get_speech_timestamps, read_audio
+
+    audio = read_audio(audio_path, sampling_rate=sampling_rate)
+    vad = load_silero_vad()
+    chunks = get_speech_timestamps(
+        audio, vad,
+        sampling_rate=sampling_rate,
+        max_speech_duration_s=_MOONSHINE_MAX_CHUNK_S,
+        min_silence_duration_ms=500,
+        speech_pad_ms=200,
+        threshold=0.35,
+    )
+    if not chunks:
+        log.info("Moonshine VAD: no speech detected — passing full audio")
+        chunks = [{"start": 0, "end": int(audio.shape[-1])}]
+    return audio, chunks
+
+
+def _transcribe_moonshine(
+    audio_path: str,
+    *,
+    model: str | None = None,
+    language: str | None = None,
+    device: str = "cpu",
+) -> tuple[list[dict], str]:
+    """Transcribe using Moonshine ASR via Hugging Face Transformers.
+
+    Moonshine is a small (27–61 M param) CPU-friendly ASR model from Useful
+    Sensors.  The Arabic-tuned ``moonshine-tiny-ar`` variant matches
+    ``whisper-medium`` on Arabic Fleurs/CommonVoice at ~28x fewer parameters.
+
+    Because Moonshine has no native timestamps and was trained on ≤30 s clips,
+    we run Silero VAD ourselves to chunk the audio and stamp each chunk with
+    its start/end times from the VAD output.
+
+    Requires: pip install "mazinger[transcribe-moonshine]"
+
+    Returns:
+        A tuple of (segments, detected_language).
+        Each segment has 'start', 'end', and 'text' keys (no word-level
+        timestamps — Moonshine cannot produce them).
+    """
+    try:
+        import torch  # noqa: F401  (probed up-front so we fail fast if missing)
+        from transformers import AutoProcessor, MoonshineForConditionalGeneration
+    except ImportError as e:
+        raise ImportError(
+            "Moonshine support requires transformers>=4.49 and torch. "
+            "Install with: pip install 'mazinger[transcribe-moonshine]'"
+        ) from e
+
+    # Audio preprocessing: 16 kHz mono WAV (matches Whisper, reused by VAD).
+    audio_path = _preprocess_audio(audio_path)
+
+    model_id = model or _moonshine_default_model(language)
+    log.info("Loading Moonshine model: %s on %s", model_id, device)
+
+    cache_key = f"moonshine|{model_id}|{device}"
+    if cache_key in _whisper_cache:
+        log.info("Reusing cached Moonshine model: %s", cache_key)
+        moon_model, processor = _whisper_cache[cache_key]
+    else:
+        import torch as _torch
+        _is_cuda = "cuda" in str(device) and _torch.cuda.is_available()
+        torch_dtype = _torch.float16 if _is_cuda else _torch.float32
+        processor = AutoProcessor.from_pretrained(model_id)
+        moon_model = MoonshineForConditionalGeneration.from_pretrained(
+            model_id, dtype=torch_dtype,
+        ).to(device)
+        moon_model.eval()
+        _whisper_cache[cache_key] = (moon_model, processor)
+
+    target_sr = processor.feature_extractor.sampling_rate
+
+    # Silero VAD chunks (speech-only) — each capped to ~25 s.
+    audio, speech_chunks = _moonshine_vad_chunks(audio_path, target_sr)
+
+    log.info("Moonshine: transcribing %d VAD chunks", len(speech_chunks))
+
+    raw_segments: list[dict] = []
+    import torch as _torch
+    audio_np = audio.numpy() if hasattr(audio, "numpy") else audio
+    for clip in speech_chunks:
+        s_samp, e_samp = int(clip["start"]), int(clip["end"])
+        if e_samp <= s_samp:
+            continue
+        clip_audio = audio_np[s_samp:e_samp]
+        clip_dur_s = (e_samp - s_samp) / target_sr
+
+        inputs = processor(
+            clip_audio, return_tensors="pt", sampling_rate=target_sr,
+        ).to(device)
+
+        # Hallucination guard from the model card: 13 tokens/sec.
+        max_length = max(8, int(clip_dur_s * _MOONSHINE_TOKENS_PER_SEC))
+        with _torch.no_grad():
+            ids = moon_model.generate(**inputs, max_length=max_length)
+        text = processor.batch_decode(ids, skip_special_tokens=True)[0].strip()
+        if not text:
+            continue
+        raw_segments.append({
+            "start": s_samp / target_sr,
+            "end": e_samp / target_sr,
+            "text": text,
+        })
+
+    detected_lang = (language or "").lower().split("-")[0] or "unknown"
+    if detected_lang == "unknown":
+        # The English-only model id starts with "moonshine-base"; the
+        # language-specialised checkpoints follow the pattern "moonshine-tiny-XX".
+        suffix = model_id.rsplit("-", 1)[-1]
+        if suffix and suffix.lower() != "base" and len(suffix) <= 3:
+            detected_lang = suffix.lower()
+        elif "base" in model_id:
+            detected_lang = "en"
+
+    log.info(
+        "Moonshine transcription complete: %d segments, language=%s",
+        len(raw_segments), detected_lang,
+    )
+    return raw_segments, detected_lang
+
+
 # ── LLM-based text refinement ────────────────────────────────────────────────
 
 def _refine_segments_llm(
@@ -1098,17 +1273,19 @@ def transcribe(
     vad_options: dict | None = None,
     word_timestamps: bool = True,
 ) -> str:
-    """Transcribe audio to SRT using OpenAI Whisper, faster-whisper, WhisperX, MLX Whisper, or Deepgram.
+    """Transcribe audio to SRT using OpenAI Whisper, faster-whisper, WhisperX, MLX Whisper, Deepgram, or Moonshine.
 
     Parameters:
         audio_path:     Path to the input audio file.
         output_path:    Where to save the final SRT.
         method:         Transcription backend: ``faster-whisper`` (default),
-                        ``openai``, ``whisperx``, ``mlx-whisper``, or
-                        ``deepgram``.
+                        ``openai``, ``whisperx``, ``mlx-whisper``,
+                        ``deepgram``, or ``moonshine``.
         model:          Model name. Defaults to ``whisper-1`` for OpenAI,
                         ``large-v3`` for faster-whisper/WhisperX,
-                        ``nova-3`` for Deepgram.
+                        ``nova-3`` for Deepgram, and a Moonshine HF id chosen
+                        from ``language`` (``moonshine-tiny-ar`` for Arabic,
+                        ``moonshine-base`` otherwise).
         device:         ``cuda`` or ``cpu`` (local methods only).
         batch_size:     Inference batch size (local methods only).
         compute_type:   ``float16``, ``int8``, or ``int8_float16`` (local methods).
@@ -1143,6 +1320,9 @@ def transcribe(
 
         # Using MLX Whisper (Apple Silicon, requires [transcribe-mlx] extra)
         transcribe("audio.mp3", "output.srt", method="mlx-whisper")
+
+        # Using Moonshine (CPU-friendly, Arabic-tuned variant by default)
+        transcribe("audio.mp3", "output.srt", method="moonshine", language="ar")
     """
     if not os.path.exists(audio_path):
         raise FileNotFoundError(f"Audio file not found: {audio_path}")
@@ -1214,10 +1394,18 @@ def transcribe(
             api_key=deepgram_api_key,
             keyterms=keyterms,
         )
+    elif method == "moonshine":
+        raw_segments, detected_lang = _transcribe_moonshine(
+            audio_path,
+            model=model,
+            language=language,
+            device=device,
+        )
     else:
         raise ValueError(
             f"Unknown transcription method: {method!r}. "
-            "Use 'openai', 'faster-whisper', 'whisperx', 'mlx-whisper', or 'deepgram'."
+            "Use 'openai', 'faster-whisper', 'whisperx', 'mlx-whisper', "
+            "'deepgram', or 'moonshine'."
         )
 
     log.info("Transcription complete: %d segments, language=%s", len(raw_segments), detected_lang)

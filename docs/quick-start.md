@@ -164,6 +164,9 @@ mazinger transcribe audio.mp3 -o subs.srt --method deepgram --language ar
 # Local with faster-whisper (default)
 mazinger transcribe audio.mp3 -o subs.srt --method faster-whisper --device cuda
 
+# Local with Moonshine — small, CPU-friendly, Arabic-tuned variant
+mazinger transcribe audio.mp3 -o subs.srt --method moonshine --language ar --device cpu
+
 # Local with WhisperX (requires transcribe-whisperx extra)
 mazinger transcribe audio.mp3 -o subs.srt --method whisperx --device cuda
 
