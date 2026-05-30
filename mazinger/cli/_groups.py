@@ -8,7 +8,7 @@ import sys
 
 DEFAULT_BASE_DIR = "./mazinger_output"
 
-from mazinger.tts import DEFAULT_MLX_MODEL
+from mazinger.tts import DEFAULT_MLX_MODEL, DEFAULT_OMNIVOICE_MODEL
 from mazinger.transcribe import DEFAULT_MLX_WHISPER_MODEL
 
 log = __import__("logging").getLogger(__name__)
@@ -189,11 +189,13 @@ def add_tts_engine(p: argparse.ArgumentParser) -> None:
     p.add_argument("--tts-language", default=None, type=_language_type,
                    help="Target TTS language (defaults to --target-language).")
     p.add_argument(
-        "--tts-engine", default="qwen", choices=["qwen", "chatterbox", "mlx"],
-        help="TTS engine: 'qwen' (Qwen3-TTS), 'chatterbox' (ResembleAI Chatterbox), or 'mlx' (Apple Silicon).",
+        "--tts-engine", default="qwen", choices=["qwen", "chatterbox", "mlx", "omnivoice"],
+        help="TTS engine: 'qwen' (Qwen3-TTS), 'chatterbox' (ResembleAI Chatterbox), 'mlx' (Apple Silicon), or 'omnivoice' (Lahgtna-OmniVoice).",
     )
     p.add_argument("--mlx-tts-model", default=DEFAULT_MLX_MODEL,
                    help="MLX Qwen3-TTS model name (default: mlx-community/Qwen3-TTS-12Hz-0.6B-Base-bf16).")
+    p.add_argument("--omnivoice-model", default=DEFAULT_OMNIVOICE_MODEL,
+                   help=f"OmniVoice TTS model name (default: {DEFAULT_OMNIVOICE_MODEL}).")
     p.add_argument("--chatterbox-exaggeration", type=float, default=0.5,
                    help="Chatterbox exaggeration level (0.0-1.0, default 0.5).")
     p.add_argument("--chatterbox-cfg", type=float, default=0.5,

@@ -7,7 +7,7 @@ import os
 from typing import Any
 
 from mazinger.paths import ProjectPaths
-from mazinger.tts import DEFAULT_MLX_MODEL
+from mazinger.tts import DEFAULT_MLX_MODEL, DEFAULT_OMNIVOICE_MODEL
 from mazinger.utils import (
     save_json, load_json, get_audio_duration, LLMUsageTracker,
     is_valid_media_file, is_valid_srt_file, is_valid_json_file,
@@ -80,6 +80,7 @@ class MazingerDubber:
         tts_language: str | None = None,
         tts_engine: str = "qwen",
         mlx_model: str = DEFAULT_MLX_MODEL,
+        omnivoice_model: str = DEFAULT_OMNIVOICE_MODEL,
         deepgram_api_key: str | None = None,
         source_language: str = "auto",
         target_language: str = "English",
@@ -140,10 +141,11 @@ class MazingerDubber:
             tts_model_name: HuggingFace model identifier for TTS.
             tts_dtype:      Weight dtype for the TTS model.
             tts_language:   Language name passed to the TTS model.
-            tts_engine:     TTS engine to use: ``qwen`` or ``chatterbox``.
+            tts_engine:     TTS engine to use: ``qwen``, ``chatterbox``, ``mlx``, or ``omnivoice``.
             chatterbox_model: HuggingFace model identifier for Chatterbox.
             chatterbox_exaggeration: Exaggeration level for Chatterbox (0.0-1.0).
             chatterbox_cfg: CFG weight for Chatterbox (0.0-1.0).
+            omnivoice_model: HuggingFace model identifier for OmniVoice.
             cookies_from_browser: yt-dlp ``--cookies-from-browser`` value.
             cookies:       Path to a Netscape cookie file for yt-dlp ``--cookies``.
             quality:       Video download quality: ``low`` (360p), ``medium``
@@ -466,6 +468,7 @@ class MazingerDubber:
             dtype=tts_dtype, engine=tts_engine,
             chatterbox_model=chatterbox_model,
             mlx_model=mlx_model,
+            omnivoice_model=omnivoice_model,
         )
         voice_prompt = tts.create_voice_prompt(
             tts_model, voice_sample, ref_text,
@@ -473,6 +476,7 @@ class MazingerDubber:
             chatterbox_exaggeration=chatterbox_exaggeration,
             chatterbox_cfg=chatterbox_cfg,
             mlx_model=mlx_model,
+            omnivoice_model=omnivoice_model,
         )
         segment_info = tts.synthesize_segments(
             tts_model, voice_prompt, srt_entries, proj.tts_segments_dir,

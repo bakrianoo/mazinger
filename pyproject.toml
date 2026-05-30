@@ -86,6 +86,12 @@ tts-mlx = [
     "mlx>=0.20",
     "soundfile>=0.12",
 ]
+# TTS with OmniVoice (Lahgtna-OmniVoice)
+tts-omnivoice = [
+    "lahgtna-omnivoice",
+    "torch>=2.0",
+    "soundfile>=0.12",
+]
 # MLX Whisper for Apple Silicon transcription
 transcribe-mlx = [
     "mlx-whisper>=0.4",
@@ -93,6 +99,10 @@ transcribe-mlx = [
 # Full pipeline with MLX + faster-whisper fallback/support — Apple Silicon only
 all-mlx = [
     "mazinger[transcribe-faster,transcribe-mlx,tts-mlx]",
+]
+# Full pipeline with OmniVoice TTS + faster-whisper
+all-omnivoice = [
+    "mazinger[transcribe-faster,tts-omnivoice,audio-enhance]",
 ]
 
 [project.scripts]
