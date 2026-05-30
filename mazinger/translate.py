@@ -98,6 +98,19 @@ SUPPORTED_LANGUAGES = (
     "Ukrainian",
     "Urdu",
     "Vietnamese",
+    "Egyptian",
+    "Saudi",
+    "Moroccan",
+    "Bahraini",
+    "Sudanese",
+    "Iraqi",
+    "Lebanese",
+    "Syrian",
+    "Libyan",
+    "Palestinian",
+    "Tunisian",
+    "Algerian",
+    "Yemeni",
 )
 
 _LANG_LOOKUP = {lang.lower(): lang for lang in SUPPORTED_LANGUAGES}

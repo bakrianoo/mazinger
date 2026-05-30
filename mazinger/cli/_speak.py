@@ -113,6 +113,7 @@ def handler(args: argparse.Namespace) -> None:
         args.tts_model, device=args.device, dtype=args.dtype, engine=engine,
         chatterbox_model=args.chatterbox_model,
         mlx_model=args.mlx_tts_model,
+        omnivoice_model=args.omnivoice_model,
     )
     voice_prompt = tts.create_voice_prompt(
         model, voice_sample, ref_text,
@@ -120,6 +121,7 @@ def handler(args: argparse.Namespace) -> None:
         chatterbox_exaggeration=args.chatterbox_exaggeration,
         chatterbox_cfg=args.chatterbox_cfg,
         mlx_model=args.mlx_tts_model,
+        omnivoice_model=args.omnivoice_model,
     )
     segment_info = tts.synthesize_segments(
         model, voice_prompt, srt_entries, segments_dir,
