@@ -209,7 +209,7 @@ with gr.Blocks(title="Mazinger Studio", theme=theme, css=CSS) as app:
 
     # ── LLM Provider & Compute ────────────────────────────────────
     gr.Markdown("#### 🤖  LLM PROVIDER", elem_classes="section-title")
-    with gr.Accordion("Translation engine & GPU controls", open=False):
+    with gr.Accordion("Translation engine & GPU controls", open=True):
         llm_provider = gr.Radio(
             ["Ollama (Local — Free)", "OpenAI (Cloud)"],
             value="Ollama (Local — Free)",
@@ -272,7 +272,7 @@ with gr.Blocks(title="Mazinger Studio", theme=theme, css=CSS) as app:
         gpu_btn.click(fn=free_gpu_and_restart_ollama, inputs=[], outputs=[gpu_status])
 
     # ── Advanced Settings ─────────────────────────────────────────
-    with gr.Accordion("⚙️  Advanced Settings", open=False):
+    with gr.Accordion("⚙️  Advanced Settings", open=True):
         with gr.Tabs():
             with gr.Tab("🎛️ Output"):
                 output_type = gr.Radio(
