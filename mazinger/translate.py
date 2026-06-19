@@ -199,6 +199,7 @@ def _build_system_prompt(
     tone: str = "",
     speakers: list[dict] | None = None,
     languages: list[str] | None = None,
+    user_instructions: str = "",
 ) -> str:
     kw_examples = ", ".join(f'"{ k}"' for k in keywords[:10])
     kp_summary = "; ".join(keypoints[:8])
@@ -234,7 +235,7 @@ def _build_system_prompt(
         )
         speaker_ctx = f" Speakers: {roles}."
 
-    return f"""\
+    _prompt = f"""\
 You are a professional {target_language} dubbing script writer.{source_ctx}{genre_ctx}{dialect_ctx}{tone_ctx}{speaker_ctx} You are given subtitle texts as a JSON \
 array (with index, text, and a target word count), video screenshots, and a \
 keyword/keypoint list. Produce natural, well-phrased {target_language} dubbing \
@@ -303,7 +304,13 @@ EXAMPLE OUTPUT (with a merge):
 
 You may receive CONTEXT BEFORE and CONTEXT AFTER sections. They are for \
 reference only -- translate and return ONLY the MAIN BLOCK entries."""
-
+    if user_instructions and user_instructions.strip():
+        _prompt += (
+            "\n\nCONTENT & TRANSLATION GUIDELINES FROM THE USER:\n"
+            + user_instructions.strip()
+            + "\nApply these guidelines throughout your translation."
+        )
+    return _prompt
 
 
 def _technical_terms_instruction(
@@ -571,6 +578,7 @@ def translate_srt(
     translate_technical_terms: bool = False,
     video_meta: dict | None = None,
     usage_tracker: LLMUsageTracker | None = None,
+    user_instructions: str = "",
 ) -> str:
     """Translate an SRT file to the target language using batched LLM calls with visual context.
 
@@ -622,6 +630,7 @@ def translate_srt(
         tone=description.get("tone", ""),
         speakers=description.get("speakers"),
         languages=description.get("languages"),
+        user_instructions=user_instructions,
     )
 
     log.info("Translating %d SRT blocks in batches of %d", len(all_blocks), blocks_per_batch)

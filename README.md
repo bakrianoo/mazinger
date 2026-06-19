@@ -23,8 +23,11 @@
 
 ### 1. Install
 
+> ⚠️ **Use `uv` — plain `pip` will fail.** `mazinger[all]` bundles packages with conflicting dependency pins that only `uv` can resolve.
+> Install `uv` once: `pip install uv`
+
 ```bash
-pip install "mazinger[all]"
+uv pip install "mazinger[all]"
 ```
 
 ### 2. Launch the Web UI

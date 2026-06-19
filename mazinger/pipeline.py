@@ -114,6 +114,7 @@ class MazingerDubber:
         output_type: str = "audio",
         subtitle_style=None,
         subtitle_source: str = "translated",
+        user_instructions: str = "",
     ) -> ProjectPaths:
         """Run the full pipeline: download/ingest, transcribe, translate, and dub.
 
@@ -376,6 +377,7 @@ class MazingerDubber:
                 llm_model=self.llm_model,
                 video_meta=video_meta,
                 usage_tracker=usage_tracker,
+                user_instructions=user_instructions,
             )
             save_json(description, proj.description)
 
@@ -462,6 +464,7 @@ class MazingerDubber:
                 translate_technical_terms=translate_technical_terms,
                 video_meta=video_meta,
                 usage_tracker=usage_tracker,
+                user_instructions=user_instructions,
                 **(dict(words_per_second=words_per_second) if words_per_second is not None else {}),
                 **(dict(duration_budget=duration_budget) if duration_budget is not None else {}),
             )

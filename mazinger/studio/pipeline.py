@@ -26,11 +26,24 @@ def _setup_logging(collector):
     return maz_log
 
 
-def _resolve_source(source_type, url, uploaded_file):
+def _resolve_source(source_type, url, uploaded_file, local_path=None):
     if source_type == "YouTube URL":
         if not url or not url.strip():
             return None, "❌ Please enter a video URL."
         return url.strip(), None
+    if source_type == "Local Path":
+        path = (local_path or "").strip()
+        if not path:
+            return None, "❌ Please enter a local file path."
+        if not os.path.isfile(path):
+            return None, f"❌ File not found: {path}"
+        from mazinger.download import is_audio_file, is_video_file
+        if not is_audio_file(path) and not is_video_file(path):
+            return None, (
+                f"❌ Unsupported file type: {os.path.splitext(path)[1] or '(no extension)'}. "
+                "Supported: mp4 mkv avi mov webm flv wmv ts m2ts mp3 wav flac aac ogg m4a wma opus"
+            )
+        return path, None
     if not uploaded_file:
         return None, "❌ Please upload a video or audio file."
     return uploaded_file, None
@@ -102,7 +115,7 @@ def _format_pipeline_error(exc: BaseException, prefix: str = "Pipeline failed") 
 
 
 def run_dubbing(
-    source_type, url, uploaded_file,
+    source_type, url, uploaded_file, local_path,
     cookies_text,
     target_language, voice_type, voice_theme_label, voice_preset,
     voice_file, voice_script_text,
@@ -118,6 +131,7 @@ def run_dubbing(
     output_type, force_reset,
     stream_llm,
     youtube_subs=False,
+    user_instructions="",
 ):
     """Generator → yields (status, logs, llm_stream, audio, srt_file, render_paths) tuples."""
 
@@ -129,7 +143,7 @@ def run_dubbing(
         yield "❌ Please enter your OpenAI API key.", *_empty[1:]
         return
 
-    source, err = _resolve_source(source_type, url, uploaded_file)
+    source, err = _resolve_source(source_type, url, uploaded_file, local_path)
     if err:
         yield err, *_empty[1:]
         return
@@ -168,6 +182,7 @@ def run_dubbing(
             output_type, force_reset,
             stream_llm,
             youtube_subs,
+            user_instructions=user_instructions,
         )
         return
 
@@ -187,6 +202,7 @@ def run_dubbing(
         force_reset,
         stream_llm,
         youtube_subs,
+        user_instructions=user_instructions,
     )
 
 
@@ -205,6 +221,7 @@ def _run_subtitles(
     output_type, force_reset,
     stream_llm,
     youtube_subs=False,
+    user_instructions="",
 ):
     """Generator → yields (status, logs, llm_stream, audio, srt_file, render_paths) tuples."""
 
@@ -378,6 +395,7 @@ def _run_subtitles(
             else:
                 description = describe_content(
                     srt_text, thumb_paths, client, llm_model=_llm,
+                    user_instructions=user_instructions,
                 )
                 save_json(description, proj.description)
 
@@ -427,6 +445,7 @@ def _run_subtitles(
                         source_language=source_language if source_language != "Auto-detect" else "auto",
                         target_language=target_language,
                         translate_technical_terms=translate_technical,
+                        user_instructions=user_instructions,
                         **({"words_per_second": words_per_second} if words_per_second > 0 else {}),
                         **({"duration_budget": duration_budget} if duration_budget != 0.85 else {}),
                     )
@@ -509,6 +528,7 @@ def _run_full_dub(
     force_reset,
     stream_llm,
     youtube_subs=False,
+    user_instructions="",
 ):
     """Generator → yields (status, logs, llm_stream, audio, srt_file, render_paths) tuples."""
 
@@ -601,6 +621,7 @@ def _run_full_dub(
                 asr_review=True,
                 use_youtube_subs=youtube_subs,
                 **(dict(cookies=_cookies_path) if _cookies_path else {}),
+                **(dict(user_instructions=user_instructions) if user_instructions and user_instructions.strip() else {}),
             )
 
             if source_language and source_language != "Auto-detect":

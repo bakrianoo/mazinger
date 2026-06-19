@@ -63,6 +63,7 @@ def describe_content(
     llm_model: str = "gpt-4.1",
     video_meta: dict | None = None,
     usage_tracker: LLMUsageTracker | None = None,
+    user_instructions: str = "",
 ) -> dict:
     """Send thumbnails and the full SRT to an LLM for content analysis.
 
@@ -133,12 +134,19 @@ def describe_content(
     })
 
     log.info("Requesting content description from %s...", llm_model)
+    _system = _DESCRIBE_SYSTEM
+    if user_instructions and user_instructions.strip():
+        _system += (
+            "\n\nADDITIONAL CONTEXT FROM THE USER:\n"
+            + user_instructions.strip()
+            + "\nUse this context to improve the accuracy of your analysis."
+        )
     resp = client.chat.completions.create(
         model=llm_model,
         temperature=0.15,
         think=False,
         messages=[
-            {"role": "system", "content": _DESCRIBE_SYSTEM},
+            {"role": "system", "content": _system},
             {"role": "user", "content": user_parts},
         ],
         # Sampling options — penalise repetition, cap output length

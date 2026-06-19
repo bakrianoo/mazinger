@@ -18,7 +18,7 @@ from mazinger.studio.pipeline import run_dubbing, render_video
 #  Build the Gradio interface
 # ═══════════════════════════════════════════════════════════════════════
 
-with gr.Blocks(title="Mazinger Studio") as app:
+with gr.Blocks(title="Mazinger Studio", theme=theme, css=CSS) as app:
 
     # ── Header ────────────────────────────────────────────────────
     gr.Markdown(
@@ -27,77 +27,11 @@ with gr.Blocks(title="Mazinger Studio") as app:
         elem_classes="app-header",
     )
 
-    # ── LLM Provider ──────────────────────────────────────────────
-    gr.Markdown("#### 🤖  LLM PROVIDER", elem_classes="section-title")
-    with gr.Group(elem_classes="card-highlight"):
-        llm_provider = gr.Radio(
-            ["Ollama (Local — Free)", "OpenAI (Cloud)"],
-            value="Ollama (Local — Free)",
-            label="Translation engine",
-            container=False,
-        )
-
-        with gr.Group(visible=True) as ollama_group:
-            ollama_model = gr.Textbox(
-                label="Ollama Model",
-                value=OLLAMA_DEFAULT_MODEL,
-                placeholder="e.g. qwen3.5:2b-q8_0, llama3.1:8b, …",
-                info="Model will be pulled automatically on first run",
-            )
-            gr.Markdown(
-                "✅ **No API key needed.** Runs 100% locally.  \n"
-                "Transcription uses local Faster Whisper on your GPU.",
-                elem_classes="ollama-info",
-            )
-
-        with gr.Group(visible=False) as openai_group:
-            openai_key = gr.Textbox(
-                label="OpenAI API Key",
-                type="password",
-                placeholder="sk-…",
-                info="Required for transcription (Whisper) and translation (GPT)",
-            )
-            gr.Markdown(
-                "Uses OpenAI Whisper for transcription and GPT for translation.",
-                elem_classes="openai-info",
-            )
-            with gr.Accordion("🔌  API Override", open=False):
-                gr.Markdown(
-                    "*Override the provider settings above. "
-                    "Leave empty to use defaults.*",
-                    elem_classes="openai-info",
-                )
-                api_base_url = gr.Textbox(
-                    label="API Base URL",
-                    placeholder="https://api.openai.com/v1",
-                    value="https://api.openai.com/v1",
-                )
-                llm_model = gr.Textbox(
-                    label="LLM Model",
-                    placeholder="gpt-4.1",
-                    value="gpt-4.1",
-                )
-
-    with gr.Row():
-        gpu_btn = gr.Button(
-            "🧹 Free GPU & Restart Ollama",
-            variant="secondary",
-            size="sm",
-        )
-        gpu_status = gr.Textbox(
-            label="GPU Status",
-            interactive=False,
-            scale=3,
-        )
-    gpu_btn.click(fn=free_gpu_and_restart_ollama, inputs=[], outputs=[gpu_status])
-
-    gr.HTML('<hr class="divider">')
-
     # ── Source ─────────────────────────────────────────────────────
     gr.Markdown("#### 📹  SOURCE", elem_classes="section-title")
     with gr.Group(elem_classes="card"):
         source_type = gr.Radio(
-            ["YouTube URL", "Upload File"],
+            ["YouTube URL", "Upload File", "Local Path"],
             value="YouTube URL",
             label="Source type",
             container=False,
@@ -109,7 +43,18 @@ with gr.Blocks(title="Mazinger Studio") as app:
         )
         file_input = gr.File(
             label="Upload a video or audio file",
-            file_types=[".mp4", ".mkv", ".webm", ".mov", ".mp3", ".wav", ".m4a"],
+            file_types=[
+                # video
+                ".mp4", ".mkv", ".avi", ".mov", ".webm", ".flv", ".wmv", ".ts", ".m2ts",
+                # audio
+                ".mp3", ".wav", ".flac", ".aac", ".ogg", ".m4a", ".wma", ".opus",
+            ],
+            visible=False,
+        )
+        local_path_input = gr.Textbox(
+            label="Local file path",
+            placeholder="/path/to/video.mp4",
+            info="Absolute path to a video or audio file on this machine",
             visible=False,
         )
 
@@ -117,8 +62,9 @@ with gr.Blocks(title="Mazinger Studio") as app:
         return (
             gr.update(visible=(choice == "YouTube URL")),
             gr.update(visible=(choice == "Upload File")),
+            gr.update(visible=(choice == "Local Path")),
         )
-    source_type.change(_toggle_source, source_type, [url_input, file_input])
+    source_type.change(_toggle_source, source_type, [url_input, file_input, local_path_input])
 
     # ── YouTube Cookies (collapsed) ───────────────────────────────
     _IMG_BASE = "https://raw.githubusercontent.com/bakrianoo/mazinger/refs/heads/master/docs/assets/yt-cache"
@@ -238,7 +184,7 @@ with gr.Blocks(title="Mazinger Studio") as app:
                 )
 
         # ── Auto-Clone (clone voice from source — default) ──
-        with gr.Group(visible=True) as autoclone_group:
+        with gr.Group(visible=True, elem_classes="voice-info-box") as autoclone_group:
             gr.Markdown(
                 "**Qwen3-TTS / Chatterbox / MLX:** The speaker's voice is cloned "
                 "directly from the source audio. No voice files needed — the "
@@ -246,7 +192,7 @@ with gr.Blocks(title="Mazinger Studio") as app:
                 "**OmniVoice:** Uses the model's built-in auto-voice mode — "
                 "no reference audio required. The model selects an appropriate "
                 "voice on its own.",
-                elem_classes="openai-info",
+                elem_classes="voice-info-text",
             )
 
     def _toggle_voice(choice):
@@ -261,10 +207,74 @@ with gr.Blocks(title="Mazinger Studio") as app:
         [theme_group, preset_group, custom_group, autoclone_group],
     )
 
+    # ── LLM Provider & Compute ────────────────────────────────────
+    gr.Markdown("#### 🤖  LLM PROVIDER", elem_classes="section-title")
+    with gr.Accordion("Translation engine & GPU controls", open=False):
+        llm_provider = gr.Radio(
+            ["Ollama (Local — Free)", "OpenAI (Cloud)"],
+            value="Ollama (Local — Free)",
+            label="Translation engine",
+            container=False,
+        )
+
+        with gr.Group(visible=True) as ollama_group:
+            ollama_model = gr.Textbox(
+                label="Ollama Model",
+                value=OLLAMA_DEFAULT_MODEL,
+                placeholder="e.g. qwen3.5:2b-q8_0, llama3.1:8b, …",
+                info="Model will be pulled automatically on first run",
+            )
+            gr.Markdown(
+                "✅ **No API key needed.** Runs 100% locally.  \n"
+                "Transcription uses local Faster Whisper on your GPU.",
+                elem_classes="ollama-info",
+            )
+
+        with gr.Group(visible=False) as openai_group:
+            openai_key = gr.Textbox(
+                label="OpenAI API Key",
+                type="password",
+                placeholder="sk-…",
+                info="Required for transcription (Whisper) and translation (GPT)",
+            )
+            gr.Markdown(
+                "Uses OpenAI Whisper for transcription and GPT for translation.",
+                elem_classes="openai-info",
+            )
+            with gr.Accordion("🔌  API Override", open=False):
+                gr.Markdown(
+                    "*Override the provider settings above. "
+                    "Leave empty to use defaults.*",
+                    elem_classes="openai-info",
+                )
+                api_base_url = gr.Textbox(
+                    label="API Base URL",
+                    placeholder="https://api.openai.com/v1",
+                    value="https://api.openai.com/v1",
+                )
+                llm_model = gr.Textbox(
+                    label="LLM Model",
+                    placeholder="gpt-4.1",
+                    value="gpt-4.1",
+                )
+
+        with gr.Row():
+            gpu_btn = gr.Button(
+                "🧹 Free GPU & Restart Ollama",
+                variant="secondary",
+                size="sm",
+            )
+            gpu_status = gr.Textbox(
+                label="GPU Status",
+                interactive=False,
+                scale=3,
+            )
+        gpu_btn.click(fn=free_gpu_and_restart_ollama, inputs=[], outputs=[gpu_status])
+
     # ── Advanced Settings ─────────────────────────────────────────
-    with gr.Accordion("⚙️  Advanced Settings", open=True):
+    with gr.Accordion("⚙️  Advanced Settings", open=False):
         with gr.Tabs():
-            with gr.Tab("� Output"):
+            with gr.Tab("🎛️ Output"):
                 output_type = gr.Radio(
                     ["Dubbed Audio", "Transcription Subtitles", "Translated Subtitles"],
                     value="Dubbed Audio",
@@ -304,6 +314,17 @@ with gr.Blocks(title="Mazinger Studio") as app:
                         "accurate on small Ollama setups, but skips visual "
                         "context and duration budgeting."
                     ),
+                )
+                user_instructions = gr.Textbox(
+                    label="Content & translation instructions (optional)",
+                    placeholder=(
+                        "e.g. This is a cooking tutorial — keep culinary terms in Italian. "
+                        "The speaker uses informal Egyptian Arabic. "
+                        "Preserve first-person references to the host."
+                    ),
+                    lines=3,
+                    max_lines=8,
+                    info="Passed to every LLM call (content analysis + translation). Leave empty to use defaults.",
                 )
 
             with gr.Tab("🗣️ TTS"):
@@ -553,7 +574,7 @@ with gr.Blocks(title="Mazinger Studio") as app:
     run_btn.click(
         fn=run_dubbing,
         inputs=[
-            source_type, url_input, file_input,
+            source_type, url_input, file_input, local_path_input,
             cookies_text,
             target_language, voice_type, voice_theme, voice_preset,
             voice_file, voice_script_text,
@@ -569,6 +590,7 @@ with gr.Blocks(title="Mazinger Studio") as app:
             output_type, force_reset,
             stream_llm,
             youtube_subs,
+            user_instructions,
         ],
         outputs=[status, logs, llm_stream_box, audio_output, srt_output, render_state],
     ).then(
