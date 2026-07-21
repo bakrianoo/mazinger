@@ -117,6 +117,7 @@ def ensure_transcription(proj, args: argparse.Namespace) -> None:
         method=getattr(args, "transcribe_method", "faster-whisper"),
         model=getattr(args, "whisper_model", None),
         device=getattr(args, "device", "cuda"),
+        beam_size=getattr(args, "beam_size", 5),
         openai_api_key=getattr(args, "openai_api_key", None),
         openai_base_url=getattr(args, "openai_base_url", None),
         deepgram_api_key=getattr(args, "deepgram_api_key", None),
@@ -237,9 +238,9 @@ def add_transcription(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--beam-size",
         type=int,
-        default=None,
+        default=5,
         help="Beam size for decoding when supported by the selected backend (for example, faster-whisper). "
-             "Leave unset for mlx-whisper.",
+             "Default: 5. Ignored for mlx-whisper.",
     )
     add_deepgram(p)
 
