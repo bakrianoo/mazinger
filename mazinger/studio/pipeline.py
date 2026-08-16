@@ -8,6 +8,7 @@ import threading
 import time
 import traceback
 
+from mazinger.ollama_setup import DEFAULT_TRANSLATION_MODEL, OllamaSetupError
 from mazinger.studio.constants import OLLAMA_DEFAULT_MODEL, QUALITY_MAP, METHOD_MAP, THEME_KEY_MAP
 from mazinger.studio.helpers import LogCollector, LLMStreamCollector, ensure_ollama, detect_phase, check_ollama_health
 
@@ -24,6 +25,45 @@ def _setup_logging(collector):
     maz_log.setLevel(logging.INFO)
     maz_log.addHandler(collector)
     return maz_log
+
+
+def _prepare_ollama(ollama_model, extra_models, empty):
+    """Install/start Ollama and pull the models, streaming live status.
+
+    Runs in a worker thread so the UI keeps updating during a first-run
+    install or a multi-minute model download. Returns ``True`` on success;
+    on failure it yields the (actionable) error and returns ``False``.
+    """
+    messages = ["⏳ Checking Ollama server and model…"]
+    error_box = {}
+    done = threading.Event()
+
+    def _worker():
+        try:
+            ensure_ollama(
+                ollama_model.strip() if ollama_model else None,
+                extra_models=extra_models,
+                progress=lambda msg: messages.append(f"⏳ {msg}"),
+            )
+        except Exception as exc:  # noqa: BLE001 — surfaced in the UI below
+            error_box["error"] = exc
+        finally:
+            done.set()
+
+    threading.Thread(target=_worker, daemon=True).start()
+
+    yield messages[-1], *empty[1:]
+    while not done.wait(1.5):
+        yield messages[-1], *empty[1:]
+
+    exc = error_box.get("error")
+    if exc is None:
+        return True
+
+    logging.getLogger("mazinger").error("Ollama setup failed: %s", exc)
+    prefix = "❌ " if isinstance(exc, OllamaSetupError) else "❌ Ollama setup failed: "
+    yield f"{prefix}{exc}", *empty[1:]
+    return False
 
 
 def _resolve_source(source_type, url, uploaded_file, local_path=None):
@@ -161,13 +201,15 @@ def run_dubbing(
                 yield "❌ Please enter the transcript of your voice sample.", *_empty[1:]
                 return
 
-    # Ensure Ollama server + model are ready
+    # Ensure Ollama is installed, running, and holds every model we need
     if is_ollama:
-        yield "⏳ Checking Ollama server and model…", *_empty[1:]
-        try:
-            ensure_ollama(ollama_model.strip() if ollama_model else None)
-        except Exception as exc:
-            yield f"❌ Ollama setup failed: {exc}", *_empty[1:]
+        _extra_models = []
+        if use_translation_model:
+            _extra_models.append(
+                os.environ.get("MAZINGER_TRANSLATION_MODEL")
+                or DEFAULT_TRANSLATION_MODEL
+            )
+        if not (yield from _prepare_ollama(ollama_model, _extra_models, _empty)):
             return
 
     if output_type != "Dubbed Audio":

@@ -5,9 +5,6 @@ from __future__ import annotations
 import argparse
 import logging
 import os
-import shutil
-import subprocess
-import time
 
 log = logging.getLogger(__name__)
 
@@ -69,137 +66,19 @@ def register(subparsers: argparse._SubParsersAction) -> None:
 
 # ── Ollama helpers ────────────────────────────────────────────────
 
-def _ollama_is_running() -> bool:
-    """Return True if the Ollama server is responding."""
-    import urllib.request
-    import urllib.error
-    try:
-        with urllib.request.urlopen("http://localhost:11434/api/tags", timeout=3) as r:
-            return r.status == 200
-    except (urllib.error.URLError, OSError):
-        return False
+def _setup_ollama(model: str, extra_models: list[str]) -> None:
+    """Install Ollama, start the server, pull the models and warm the main one.
 
-
-def _wait_for_ollama(retries: int = 15, delay: float = 2) -> bool:
-    """Poll Ollama until it responds (up to retries * delay seconds)."""
-    for _ in range(retries):
-        if _ollama_is_running():
-            return True
-        time.sleep(delay)
-    return False
-
-
-def _setup_ollama(model: str) -> None:
-    """Install Ollama if missing, start the server, pull and warm up the model."""
-
-    # 1. Install Ollama if not present
-    if not shutil.which("ollama"):
-        log.info("Installing Ollama …")
-        has_apt = os.path.exists("/usr/bin/apt-get")
-        if has_apt:
-            try:
-                subprocess.run(
-                    ["apt-get", "install", "-y", "-qq", "zstd", "pciutils"],
-                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                    check=False,
-                )
-            except FileNotFoundError:
-                pass
-        subprocess.check_call(
-            ["bash", "-c", "curl -fsSL https://ollama.com/install.sh | bash"],
-        )
-        log.info("Ollama installed")
-    else:
-        log.info("Ollama already installed")
-
-    # 2. Start the server if not running
-    if not _ollama_is_running():
-        subprocess.Popen(
-            ["ollama", "serve"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        )
-        log.info("Waiting for Ollama server …")
-        if _wait_for_ollama():
-            log.info("Ollama server is ready")
-        else:
-            log.warning("Ollama server did not become ready in time — pull may fail")
-    else:
-        log.info("Ollama server already running")
-
-    # 3. Pull the model (up to 3 attempts)
-    log.info("Pulling Ollama model: %s", model)
-    pulled = False
-    for attempt in range(1, 4):
-        result = subprocess.run(
-            ["ollama", "pull", model],
-            timeout=600, capture_output=True, text=True,
-        )
-        if result.returncode == 0:
-            pulled = True
-            log.info("Ollama model ready: %s", model)
-            break
-        err = (result.stderr or result.stdout or "").strip()
-        log.warning("Pull attempt %d/3 failed: %s", attempt, err)
-        time.sleep(3)
-
-    if not pulled:
-        log.error("Ollama model pull failed after 3 attempts. Try: ollama pull %s", model)
-        return
-
-    # 4. Warm up — load the model into memory
-    log.info("Warming up Ollama model …")
-    try:
-        import json
-        import urllib.request
-        body = json.dumps({
-            "model": model,
-            "messages": [{"role": "user", "content": "Reply with: ready"}],
-            "stream": False,
-            "think": False,
-            "options": {"temperature": 0.1},
-        }).encode()
-        req = urllib.request.Request(
-            "http://localhost:11434/api/chat", body,
-            headers={"Content-Type": "application/json"},
-        )
-        with urllib.request.urlopen(req, timeout=120) as resp:
-            data = json.loads(resp.read())
-        reply = data.get("message", {}).get("content", "")
-        log.info("Ollama warm-up OK: %s", reply[:80])
-    except Exception as exc:
-        log.warning("Warm-up failed: %s", exc)
-
-
-def _pull_ollama_model(model: str) -> bool:
-    """Pull an additional Ollama model after the server is up.
-
-    Returns ``True`` on success, ``False`` otherwise.  Assumes Ollama is
-    installed and the server is already running.
+    Setup failures are logged, not fatal: Studio retries the same steps lazily
+    when a mission starts (see :mod:`mazinger.ollama_setup`).
     """
-    if not shutil.which("ollama"):
-        log.warning("Cannot pull %s — ollama is not installed", model)
-        return False
-    if not _ollama_is_running():
-        log.warning("Cannot pull %s — ollama server is not running", model)
-        return False
+    from mazinger.ollama_setup import OllamaSetupError, ensure_ready
 
-    log.info("Pulling Ollama model: %s", model)
-    for attempt in range(1, 4):
-        result = subprocess.run(
-            ["ollama", "pull", model],
-            timeout=600, capture_output=True, text=True,
-        )
-        if result.returncode == 0:
-            log.info("Ollama model ready: %s", model)
-            return True
-        err = (result.stderr or result.stdout or "").strip()
-        log.warning("Pull attempt %d/3 failed for %s: %s", attempt, model, err)
-        time.sleep(3)
-
-    log.error(
-        "Ollama model pull failed after 3 attempts. Try: ollama pull %s", model,
-    )
-    return False
+    try:
+        ensure_ready(model, extra_models=extra_models, warm=True)
+    except OllamaSetupError as exc:
+        log.error("Ollama setup failed: %s", exc)
+        log.warning("Launching Studio anyway — it will retry when a mission starts.")
 
 
 def _setup_faster_whisper(model: str) -> None:
@@ -217,17 +96,16 @@ def _setup_faster_whisper(model: str) -> None:
 
 def handler(args: argparse.Namespace) -> None:
     if args.with_ollama:
-        model = (
-            args.ollama_model
-            or os.environ.get("OLLAMA_MODEL")
-            or "qwen3.5:2b-q8_0"
-        )
+        from mazinger.ollama_setup import DEFAULT_MODEL
+
+        model = args.ollama_model or os.environ.get("OLLAMA_MODEL") or DEFAULT_MODEL
         os.environ["OLLAMA_MODEL"] = model
-        _setup_ollama(model)
 
         translation_model = (args.translation_model or "").strip()
-        if translation_model and translation_model != model:
-            _pull_ollama_model(translation_model)
+        extra = [translation_model] if translation_model and translation_model != model else []
+        _setup_ollama(model, extra)
+
+        if extra:
             os.environ["MAZINGER_TRANSLATION_MODEL"] = translation_model
 
     if args.with_faster_whisper:

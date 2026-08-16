@@ -101,4 +101,4 @@ SEGMENT_MODE_MAP = {
     "Auto": "auto",
 }
 
-OLLAMA_DEFAULT_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3.5:2b-q8_0")
+from mazinger.ollama_setup import DEFAULT_MODEL as OLLAMA_DEFAULT_MODEL  # noqa: E402

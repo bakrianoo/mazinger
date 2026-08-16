@@ -25,6 +25,8 @@ After installing, launch the Studio:
 mazinger web --with-ollama --with-faster-whisper
 ```
 
+`--with-ollama` installs Ollama, starts its server and pulls the LLM up front. It is an optimisation, not a requirement: with plain `mazinger web`, Studio performs the same setup automatically the first time you start a mission with the **Ollama (Local — Free)** provider, showing progress in the status box. Point `OLLAMA_HOST` at another machine to use a remote Ollama server instead (nothing is installed locally in that case).
+
 > **Compatibility:** Chatterbox and MLX TTS pull conflicting `transformers` / platform requirements and are **not** included in `[all]`. Use the dedicated bundles below if you need them.
 
 ## Core-Only Install

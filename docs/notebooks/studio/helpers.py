@@ -55,26 +55,15 @@ class LLMStreamCollector:
             self._chunks.clear()
 
 
-def ensure_ollama(model_id: str | None = None):
-    """Start Ollama server (if needed) and pull the requested model."""
-    model_id = model_id or OLLAMA_DEFAULT_MODEL
+def ensure_ollama(model_id: str | None = None, extra_models=(), progress=None):
+    """Install Ollama (if missing), start the server and pull the models."""
+    from mazinger.ollama_setup import ensure_ready
 
-    # Start server if not already running
-    try:
-        import urllib.request
-        urllib.request.urlopen("http://localhost:11434/api/tags", timeout=3)
-    except Exception:
-        sp.Popen(["ollama", "serve"], stdout=sp.DEVNULL, stderr=sp.DEVNULL)
-        time.sleep(3)
-
-    # Check if model is already available
-    result = sp.run(["ollama", "list"], capture_output=True, text=True, timeout=10)
-    for line in result.stdout.strip().splitlines()[1:]:
-        if line.split()[0] == model_id:
-            return  # already pulled
-
-    # Pull the model
-    sp.run(["ollama", "pull", model_id], check=True, timeout=600)
+    return ensure_ready(
+        model_id or OLLAMA_DEFAULT_MODEL,
+        extra_models=extra_models,
+        progress=progress,
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════════
