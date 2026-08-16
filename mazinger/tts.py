@@ -104,6 +104,10 @@ def _load_qwen_model(
 ) -> Any:
     """Load a Qwen3-TTS model and return it."""
     import torch
+
+    from mazinger._compat import patch_qwen_tts
+
+    patch_qwen_tts()  # qwen-tts 0.1.1 vs. transformers 5.x
     from qwen_tts import Qwen3TTSModel
 
     dtype_map = {

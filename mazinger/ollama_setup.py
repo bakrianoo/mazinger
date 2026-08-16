@@ -26,6 +26,7 @@ DEFAULT_TRANSLATION_MODEL = "translategemma"
 
 _INSTALL_URL = "https://ollama.com/install.sh"
 _PULL_TIMEOUT = int(os.environ.get("OLLAMA_PULL_TIMEOUT", "1800"))
+_INSTALL_TIMEOUT = int(os.environ.get("OLLAMA_INSTALL_TIMEOUT", "1800"))
 
 #: Appended to errors the user can resolve from the Studio UI.
 _FALLBACK_HINT = (
@@ -67,6 +68,29 @@ def is_installed() -> bool:
     return shutil.which("ollama") is not None
 
 
+def _runtime_broken() -> bool:
+    """True when Ollama is installed but its unpacked runtime is truncated.
+
+    The official installer streams a ~1.4 GB archive straight into ``tar``; if
+    the download is cut short the ``ollama`` binary still lands (it is first in
+    the archive) while the ``llama-server`` helper that actually runs models
+    does not. The server then starts happily and fails *every* request with
+    HTTP 500, so we detect it here and reinstall instead.
+
+    Only a modern layout (``<prefix>/lib/ollama/``, which the installer always
+    creates before extracting) is judged; an older install without that
+    directory is left alone.
+    """
+    binary = shutil.which("ollama")
+    if not binary:
+        return False
+    for path in {binary, os.path.realpath(binary)}:
+        libdir = os.path.join(os.path.dirname(os.path.dirname(path)), "lib", "ollama")
+        if os.path.isdir(libdir):
+            return not os.path.exists(os.path.join(libdir, "llama-server"))
+    return False
+
+
 def is_running(timeout: float = 3) -> bool:
     """True when the Ollama server answers on :func:`host`."""
     try:
@@ -99,9 +123,10 @@ def has_model(model: str) -> bool:
 
 # ── Setup steps ───────────────────────────────────────────────────
 
-def install(progress=None) -> None:
+def install(progress=None, attempts: int = 3) -> None:
     """Install Ollama via the official script. No-op when already installed."""
-    if is_installed():
+    broken = _runtime_broken()
+    if is_installed() and not broken:
         return
 
     if not is_local():
@@ -115,7 +140,9 @@ def install(progress=None) -> None:
     if os.geteuid() != 0 and shutil.which("sudo") is None:
         raise OllamaSetupError(f"Installing Ollama needs root (or sudo), which is unavailable. {_FALLBACK_HINT}")
 
-    _report(progress, "Installing Ollama (one-time download, ~1 min)…")
+    if broken:
+        _report(progress, "Ollama is installed but its runtime is incomplete — reinstalling…")
+    _report(progress, "Installing Ollama (one-time ~1.4 GB download, may take a few minutes)…")
 
     # The install script unpacks a .zst archive and probes the GPU.
     if shutil.which("apt-get"):
@@ -124,17 +151,34 @@ def install(progress=None) -> None:
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
         )
 
-    result = subprocess.run(
-        ["bash", "-c", f"curl -fsSL {_INSTALL_URL} | bash"],
-        capture_output=True, text=True, timeout=900,
+    # A truncated archive is the common failure and is transient, so retry.
+    last_err = "unknown error"
+    for attempt in range(1, attempts + 1):
+        try:
+            result = subprocess.run(
+                ["bash", "-c", f"curl -fsSL {_INSTALL_URL} | bash"],
+                capture_output=True, text=True, timeout=_INSTALL_TIMEOUT,
+            )
+        except subprocess.TimeoutExpired:
+            last_err = f"timed out after {_INSTALL_TIMEOUT}s"
+        else:
+            if result.returncode == 0 and is_installed() and not _runtime_broken():
+                _report(progress, "Ollama installed")
+                return
+            tail = (result.stderr or result.stdout or "").strip().splitlines()[-3:]
+            last_err = " / ".join(tail) or (
+                "the download was truncated (llama-server missing)"
+                if _runtime_broken() else "unknown error"
+            )
+
+        log.warning("Ollama install attempt %d/%d failed: %s", attempt, attempts, last_err)
+        if attempt < attempts:
+            _report(progress, f"Install attempt {attempt} failed, retrying…")
+            time.sleep(5)
+
+    raise OllamaSetupError(
+        f"Ollama installation failed after {attempts} attempts: {last_err}. {_FALLBACK_HINT}"
     )
-    if result.returncode != 0 or not is_installed():
-        tail = (result.stderr or result.stdout or "").strip().splitlines()[-3:]
-        raise OllamaSetupError(
-            "Ollama installation failed: " + (" / ".join(tail) or "unknown error")
-            + f". {_FALLBACK_HINT}"
-        )
-    _report(progress, "Ollama installed")
 
 
 def start_server(progress=None, retries: int = 15, delay: float = 2) -> None:
@@ -222,6 +266,14 @@ def warm_up(model: str, timeout: float = 120) -> None:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             data = json.loads(resp.read())
         log.info("Ollama warm-up OK: %s", data.get("message", {}).get("content", "")[:80])
+    except urllib.error.HTTPError as exc:
+        # The status alone hides the cause; Ollama puts it in the response body.
+        detail = ""
+        try:
+            detail = json.loads(exc.read()).get("error", "")
+        except Exception:
+            pass
+        log.warning("Ollama warm-up failed: %s%s", exc, f" — {detail}" if detail else "")
     except Exception as exc:
         log.warning("Ollama warm-up failed: %s", exc)
 
