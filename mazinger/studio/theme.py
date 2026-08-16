@@ -644,6 +644,27 @@ footer {{ display: none !important; }}
     background: transparent !important;
 }}
 
+/* ── Gated-model licence links (single row) ─────────────────────── */
+.gradio-container .hf-model-links p {{
+    display: flex !important;
+    flex-wrap: wrap !important;
+    align-items: baseline !important;
+    gap: 0 0.55rem !important;
+    color: var(--mz-text-muted) !important;
+    font-size: 0.82rem !important;
+    line-height: 1.6 !important;
+    margin: 0.15rem 0 0 !important;
+}}
+.gradio-container .hf-model-links a {{
+    color: var(--mz-sandy) !important;
+    text-decoration: none !important;
+    border-bottom: 1px dotted rgba(244, 162, 97, 0.5) !important;
+}}
+.gradio-container .hf-model-links a:hover {{
+    color: var(--mz-tuscan) !important;
+    border-bottom-color: var(--mz-tuscan) !important;
+}}
+
 /* ── Voice theme selector ───────────────────────────────────────── */
 .gradio-container .voice-theme-group label span {{
     font-size: 0.88rem !important;

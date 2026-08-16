@@ -219,6 +219,11 @@ _HF_MODEL_LINKS = "\n".join(
     f"- [{label}](https://huggingface.co/{repo})" for label, repo in GATED_MODELS
 )
 
+# Same repositories on one line, for the Studio's Hugging Face card.
+HF_MODEL_LINKS_INLINE = "Accept the licence on each model page: " + "  ·  ".join(
+    f"[{label}](https://huggingface.co/{repo})" for label, repo in GATED_MODELS
+)
+
 _ACCESS_HINT = (
     "Signing in is not enough on its own — open each gated model once and "
     "click **Agree and access repository**:\n\n" + _HF_MODEL_LINKS

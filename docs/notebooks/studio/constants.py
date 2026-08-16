@@ -97,6 +97,7 @@ OLLAMA_DEFAULT_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3.5:2b-q8_0")
 # CohereX's VAD weights ship inside the package, so only the ASR models here
 # need authorisation.
 GATED_MODELS = [
-    ("Cohere Transcribe (14 languages)", "CohereLabs/cohere-transcribe-03-2026"),
-    ("Cohere Transcribe (Arabic)", "CohereLabs/cohere-transcribe-arabic-07-2026"),
+    ("Cohere", "CohereLabs/cohere-transcribe-03-2026"),
+    ("Cohere Arabic", "CohereLabs/cohere-transcribe-arabic-07-2026"),
+    ("pyannote", "pyannote/segmentation-3.0"),
 ]

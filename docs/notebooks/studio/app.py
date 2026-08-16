@@ -11,6 +11,7 @@ from theme import theme, CSS
 from helpers import (
     free_gpu_and_restart_ollama,
     hf_login_flow, hf_login_with_token, hf_logout, hf_status,
+    HF_MODEL_LINKS_INLINE,
 )
 from pipeline import run_dubbing, render_video
 
@@ -42,6 +43,7 @@ with gr.Blocks(theme=theme, title="Mazinger Studio", css=CSS) as app:
             hf_login_btn = gr.Button("🤗  Sign in with Hugging Face", variant="primary")
             hf_logout_btn = gr.Button("Sign out", variant="secondary")
         hf_status_md = gr.Markdown(hf_status())
+        gr.Markdown(HF_MODEL_LINKS_INLINE, elem_classes="hf-model-links")
 
         with gr.Accordion("Use an access token instead", open=False):
             gr.Markdown(

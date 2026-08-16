@@ -56,7 +56,12 @@ class LLMStreamCollector:
 
 
 def ensure_ollama(model_id: str | None = None, extra_models=(), progress=None):
-    """Install Ollama (if missing), start the server and pull the models."""
+    """Install Ollama (if missing), start the server and pull the models.
+
+    Self-healing so a fresh installation works even when Studio was launched
+    without ``mazinger web --with-ollama``. Raises
+    :class:`mazinger.ollama_setup.OllamaSetupError` with an actionable message.
+    """
     from mazinger.ollama_setup import ensure_ready
 
     return ensure_ready(
@@ -137,13 +142,9 @@ def detect_phase(log_text: str) -> str:
 
 def check_ollama_health() -> str | None:
     """Return a warning string if Ollama is not responding, else None."""
-    try:
-        import urllib.request
-        resp = urllib.request.urlopen("http://localhost:11434/api/tags", timeout=3)
-        resp.read()
-        return None  # healthy
-    except Exception:
-        return " ⚠️ Ollama server not responding!"
+    from mazinger.ollama_setup import is_running
+
+    return None if is_running() else " ⚠️ Ollama server not responding!"
 
 
 def free_gpu_and_restart_ollama() -> str:
@@ -185,8 +186,8 @@ def free_gpu_and_restart_ollama() -> str:
 
     # 4. Restart Ollama server
     try:
-        sp.Popen(["ollama", "serve"], stdout=sp.DEVNULL, stderr=sp.DEVNULL)
-        time.sleep(2)
+        from mazinger.ollama_setup import start_server
+        start_server()
         msgs.append("Ollama server restarted")
     except Exception as exc:
         msgs.append(f"Failed to restart Ollama: {exc}")
@@ -216,6 +217,11 @@ def free_gpu_and_restart_ollama() -> str:
 
 _HF_MODEL_LINKS = "\n".join(
     f"- [{label}](https://huggingface.co/{repo})" for label, repo in GATED_MODELS
+)
+
+# Same repositories on one line, for the Studio's Hugging Face card.
+HF_MODEL_LINKS_INLINE = "Accept the licence on each model page: " + "  ·  ".join(
+    f"[{label}](https://huggingface.co/{repo})" for label, repo in GATED_MODELS
 )
 
 _ACCESS_HINT = (

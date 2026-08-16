@@ -88,11 +88,12 @@ COHEREX_SOURCE_LANGUAGES = [
 
 # Gated HuggingFace repositories used by the pipeline.  Access has to be
 # requested once per account on the model page, in addition to signing in.
-# CohereX's VAD weights ship inside the package, so only the ASR models here
-# need authorisation.
+# Labels stay short because they are also rendered as a single row of links
+# in the Studio's Hugging Face card.
 GATED_MODELS = [
-    ("Cohere Transcribe (14 languages)", "CohereLabs/cohere-transcribe-03-2026"),
-    ("Cohere Transcribe (Arabic)", "CohereLabs/cohere-transcribe-arabic-07-2026"),
+    ("Cohere", "CohereLabs/cohere-transcribe-03-2026"),
+    ("Cohere Arabic", "CohereLabs/cohere-transcribe-arabic-07-2026"),
+    ("pyannote", "pyannote/segmentation-3.0"),
 ]
 
 SEGMENT_MODE_MAP = {
