@@ -315,11 +315,19 @@ def _run_subtitles(
                 _video_meta = _load_json(proj.video_meta) if os.path.exists(proj.video_meta) else None
                 _initial_prompt = build_initial_prompt(_video_meta)
 
+                # Honour an explicit source language at the ASR stage — CohereX
+                # cannot detect it, and the Whisper backends benefit too.
+                _asr_lang = None
+                if source_language and source_language != "Auto-detect":
+                    from mazinger.translate import lang_code_from_name
+                    _asr_lang = lang_code_from_name(source_language)
+
                 do_transcribe(
                     proj.audio, proj.source_srt,
                     method=m,
                     model=whisper_model if whisper_model and whisper_model.strip() else None,
                     device=device,
+                    language=_asr_lang,
                     openai_api_key=_api_key,
                     openai_base_url=_base_url,
                     initial_prompt=_initial_prompt,

@@ -8,7 +8,10 @@ from constants import (
     SEGMENT_MODE_MAP, THEME_CHOICES, VOICE_THEMES,
 )
 from theme import theme, CSS
-from helpers import free_gpu_and_restart_ollama
+from helpers import (
+    free_gpu_and_restart_ollama,
+    hf_login_flow, hf_login_with_token, hf_logout, hf_status,
+)
 from pipeline import run_dubbing, render_video
 
 
@@ -26,6 +29,38 @@ with gr.Blocks(theme=theme, title="Mazinger Studio", css=CSS) as app:
     )
 
     # ── LLM Provider ──────────────────────────────────────────────
+    # ── HuggingFace Account ───────────────────────────────────────
+    gr.Markdown("#### 🤗  HUGGING FACE", elem_classes="section-title")
+    with gr.Accordion("Sign in to download gated models", open=False):
+        gr.Markdown(
+            "Some models — the **Cohere Transcribe** backends used by CohereX — "
+            "are gated and only download once your account is authorised. "
+            "Sign in here, then accept the terms on each model page.",
+            elem_classes="openai-info",
+        )
+        with gr.Row():
+            hf_login_btn = gr.Button("🤗  Sign in with Hugging Face", variant="primary")
+            hf_logout_btn = gr.Button("Sign out", variant="secondary")
+        hf_status_md = gr.Markdown(hf_status())
+
+        with gr.Accordion("Use an access token instead", open=False):
+            gr.Markdown(
+                "Prefer to paste a token? Create one at "
+                "[huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) "
+                "(a **read** token is enough).",
+                elem_classes="openai-info",
+            )
+            hf_token_box = gr.Textbox(
+                label="Access token",
+                placeholder="hf_…",
+                type="password",
+            )
+            hf_token_btn = gr.Button("Use this token")
+
+    hf_login_btn.click(hf_login_flow, None, hf_status_md)
+    hf_logout_btn.click(hf_logout, None, hf_status_md)
+    hf_token_btn.click(hf_login_with_token, hf_token_box, hf_status_md)
+
     gr.Markdown("#### 🤖  LLM PROVIDER", elem_classes="section-title")
     with gr.Group(elem_classes="card-highlight"):
         llm_provider = gr.Radio(

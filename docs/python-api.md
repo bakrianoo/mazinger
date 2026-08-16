@@ -36,7 +36,7 @@ proj = dubber.dub(
     voice_theme=None,                 # str | None — pre-defined theme (alternative to sample+script)
     slug=None,                        # str — project directory name (auto-generated if omitted)
     device="cuda",                    # str — "cuda", "cpu", or "auto"
-    transcribe_method="faster-whisper",  # str — "openai", "faster-whisper", "whisperx", "mlx-whisper"
+    transcribe_method="faster-whisper",  # str — "openai", "faster-whisper", "whisperx", "coherex", "mlx-whisper"
     whisper_model=None,               # str — model name override
     mlx_whisper_model="mlx-community/whisper-large-v3-turbo",  # str — MLX Whisper model
     tts_model_name="Qwen/Qwen3-TTS-12Hz-1.7B-Base",
@@ -230,6 +230,10 @@ transcribe("audio.mp3", "subtitles.srt")
 # Local
 transcribe("audio.mp3", "subtitles.srt", method="faster-whisper", device="cuda")
 transcribe("audio.mp3", "subtitles.srt", method="whisperx", device="cuda")
+
+# CohereX — Cohere Transcribe + wav2vec2 alignment (14 languages).
+# The source language is required; Cohere Transcribe cannot detect it.
+transcribe("audio.mp3", "subtitles.srt", method="coherex", language="ar")
 
 # MLX (Apple Silicon)
 transcribe("audio.mp3", "subtitles.srt", method="mlx-whisper")

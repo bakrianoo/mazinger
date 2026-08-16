@@ -167,6 +167,9 @@ mazinger transcribe audio.mp3 -o subs.srt --method faster-whisper --device cuda
 # Local with WhisperX (requires transcribe-whisperx extra)
 mazinger transcribe audio.mp3 -o subs.srt --method whisperx --device cuda
 
+# Local with CohereX (requires transcribe-coherex extra + HF_TOKEN)
+mazinger transcribe audio.mp3 -o subs.srt --method coherex --language ar
+
 # MLX Whisper (Apple Silicon, requires transcribe-mlx extra)
 mazinger transcribe audio.mp3 -o subs.srt --method mlx-whisper
 ```

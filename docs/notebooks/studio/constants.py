@@ -71,7 +71,17 @@ METHOD_MAP = {
     "OpenAI Whisper (cloud)": "openai",
     "Faster Whisper (local GPU)": "faster-whisper",
     "WhisperX (local GPU)": "whisperx",
+    "CohereX (local GPU, 14 languages)": "coherex",
 }
+
+# Source languages CohereX can transcribe.  Other languages must use a
+# Whisper-family backend — Cohere Transcribe would otherwise transcribe
+# confidently in the wrong language rather than fail.
+COHEREX_SOURCE_LANGUAGES = [
+    "Arabic", "Chinese (Simplified)", "Dutch", "English", "French", "German",
+    "Greek", "Italian", "Japanese", "Korean", "Polish", "Portuguese",
+    "Spanish", "Vietnamese",
+]
 
 SEGMENT_MODE_MAP = {
     "Short": "short",
@@ -81,3 +91,12 @@ SEGMENT_MODE_MAP = {
 
 import os
 OLLAMA_DEFAULT_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3.5:2b-q8_0")
+
+# Gated HuggingFace repositories used by the pipeline.  Access has to be
+# requested once per account on the model page, in addition to signing in.
+# CohereX's VAD weights ship inside the package, so only the ASR models here
+# need authorisation.
+GATED_MODELS = [
+    ("Cohere Transcribe (14 languages)", "CohereLabs/cohere-transcribe-03-2026"),
+    ("Cohere Transcribe (Arabic)", "CohereLabs/cohere-transcribe-arabic-07-2026"),
+]

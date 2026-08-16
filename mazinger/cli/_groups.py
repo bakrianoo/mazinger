@@ -228,11 +228,21 @@ def add_segment_mode(p: argparse.ArgumentParser) -> None:
 def add_transcription(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--transcribe-method", default="faster-whisper",
-        choices=["openai", "faster-whisper", "whisperx", "mlx-whisper", "deepgram"],
+        choices=["openai", "faster-whisper", "whisperx", "coherex", "mlx-whisper", "deepgram"],
         help="Transcription backend: 'faster-whisper' (default), 'openai', 'whisperx', "
-             "'mlx-whisper' (Apple Silicon), or 'deepgram' (cloud).",
+             "'coherex' (Cohere Transcribe, 14 languages), 'mlx-whisper' (Apple Silicon), "
+             "or 'deepgram' (cloud).",
     )
-    p.add_argument("--whisper-model", default=None, help="Whisper/Deepgram model name.")
+    p.add_argument("--whisper-model", default=None, help="Whisper/Deepgram/CohereX model name.")
+    p.add_argument(
+        "--vad-method", default="pyannote", choices=["pyannote", "silero"],
+        help="Voice-activity detector for CohereX: 'pyannote' (default, weights "
+             "bundled with the package) or 'silero'.",
+    )
+    p.add_argument(
+        "--hf-token", default=None,
+        help="HuggingFace token for gated models (CohereX). Defaults to $HF_TOKEN.",
+    )
     p.add_argument("--mlx-whisper-model", default=DEFAULT_MLX_WHISPER_MODEL,
                    help=f"MLX Whisper model name (default: {DEFAULT_MLX_WHISPER_MODEL}).")
     p.add_argument(

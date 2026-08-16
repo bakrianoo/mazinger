@@ -74,7 +74,26 @@ METHOD_MAP = {
     "Deepgram Nova 3 (cloud)": "deepgram",
     "OpenAI Whisper (cloud)": "openai",
     "WhisperX (local GPU)": "whisperx",
+    "CohereX (local GPU, 14 languages)": "coherex",
 }
+
+# Source languages CohereX can transcribe.  Other languages must use a
+# Whisper-family backend — Cohere Transcribe would otherwise transcribe
+# confidently in the wrong language rather than fail.
+COHEREX_SOURCE_LANGUAGES = [
+    "Arabic", "Chinese (Simplified)", "Dutch", "English", "French", "German",
+    "Greek", "Italian", "Japanese", "Korean", "Polish", "Portuguese",
+    "Spanish", "Vietnamese",
+]
+
+# Gated HuggingFace repositories used by the pipeline.  Access has to be
+# requested once per account on the model page, in addition to signing in.
+# CohereX's VAD weights ship inside the package, so only the ASR models here
+# need authorisation.
+GATED_MODELS = [
+    ("Cohere Transcribe (14 languages)", "CohereLabs/cohere-transcribe-03-2026"),
+    ("Cohere Transcribe (Arabic)", "CohereLabs/cohere-transcribe-arabic-07-2026"),
+]
 
 SEGMENT_MODE_MAP = {
     "Short": "short",

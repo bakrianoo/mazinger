@@ -81,6 +81,8 @@ class MazingerDubber:
         tts_engine: str = "qwen",
         mlx_model: str = DEFAULT_MLX_MODEL,
         deepgram_api_key: str | None = None,
+        vad_method: str = "pyannote",
+        hf_token: str | None = None,
         source_language: str = "auto",
         target_language: str = "English",
         chatterbox_model: str = "ResembleAI/chatterbox",
@@ -134,10 +136,19 @@ class MazingerDubber:
             device:         Accelerator device (``cuda`` or ``cpu``).
             transcribe_method: Transcription backend: ``faster-whisper`` (default,
                             local GPU), ``openai`` (cloud API), ``whisperx``
-                            (requires [transcribe-whisperx] extra), or
-                            ``deepgram`` (cloud, requires DEEPGRAM_API_KEY).
+                            (requires [transcribe-whisperx] extra), ``coherex``
+                            (Cohere Transcribe, requires [transcribe-coherex]
+                            extra and a HuggingFace token), or ``deepgram``
+                            (cloud, requires DEEPGRAM_API_KEY).
             deepgram_api_key: Deepgram API key (Deepgram method only). Falls
                             back to ``DEEPGRAM_API_KEY`` environment variable.
+            vad_method:     Voice-activity detector for CohereX: ``pyannote``
+                            (default) or ``silero`` (no HuggingFace gate).
+            hf_token:       HuggingFace token for gated models (CohereX). Falls
+                            back to the ``HF_TOKEN`` environment variable.
+            source_language: Source language name, or ``auto`` to detect. When
+                            set, it is now also passed to the transcription
+                            backend rather than used for translation only.
             whisper_model:  Whisper model name. Defaults to ``whisper-1`` for OpenAI,
                             ``large-v3`` for faster-whisper/WhisperX.
             tts_model_name: HuggingFace model identifier for TTS.
@@ -297,18 +308,40 @@ class MazingerDubber:
             if _initial_prompt:
                 log.info("Whisper initial prompt (from metadata): %.120s…", _initial_prompt)
 
+            # Honour an explicit source language at the ASR stage.  ``auto``
+            # leaves detection to the backend — which CohereX cannot do, so it
+            # falls back to its own probe-based detector.
+            _asr_language = None
+            if source_language and source_language != "auto":
+                _asr_language = translate.lang_code_from_name(source_language)
+                # lang_code_from_name() falls back to "en" for unknown names.
+                # Forcing the wrong language on an ASR model yields fluent
+                # nonsense rather than an error, so detect instead of guessing.
+                if translate.lang_name_from_code(_asr_language) != source_language:
+                    log.warning(
+                        "Unrecognised source language %r — leaving detection to "
+                        "the transcription backend.", source_language,
+                    )
+                    _asr_language = None
+                else:
+                    log.info("Transcribing with forced source language: %s (%s)",
+                             source_language, _asr_language)
+
             transcribe.transcribe(
                 proj.audio, proj.source_srt,
                 method=transcribe_method,
                 model=whisper_model,
                 mlx_whisper_model=mlx_whisper_model,
                 device=device,
+                language=_asr_language,
                 beam_size=None if transcribe_method == "mlx-whisper" else beam_size,
                 openai_api_key=self._api_key,
                 openai_base_url=self._base_url,
                 deepgram_api_key=deepgram_api_key,
                 skip_resegment=not use_resegmented,
                 initial_prompt=_initial_prompt,
+                vad_method=vad_method,
+                hf_token=hf_token,
             )
 
         transcribe.clear_cache()

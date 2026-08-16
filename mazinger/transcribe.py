@@ -1,6 +1,6 @@
-"""Transcribe audio to SRT using OpenAI Whisper, faster-whisper, WhisperX, MLX Whisper, or Deepgram.
+"""Transcribe audio to SRT using OpenAI Whisper, faster-whisper, WhisperX, CohereX, MLX Whisper, or Deepgram.
 
-Supports five transcription backends:
+Supports six transcription backends:
 - **openai** (default): Uses OpenAI's Whisper API. No local GPU required,
   simple setup, works with any transformers version. Requires OPENAI_API_KEY.
 - **faster-whisper**: Fast local transcription using CTranslate2. 4x faster
@@ -9,6 +9,11 @@ Supports five transcription backends:
 - **whisperx**: Local transcription with word-level alignment via wav2vec2.
   Requires PyTorch + CUDA and the [transcribe-whisperx] extra. Not compatible
   with chatterbox-tts due to conflicting transformers requirements.
+- **coherex**: Local transcription with Cohere Transcribe plus word-level
+  alignment via wav2vec2, following the WhisperX design. Covers 14 languages
+  and offers a dedicated Arabic model. Requires PyTorch + CUDA and the
+  [transcribe-coherex] extra. Unlike Whisper, the Cohere model performs no
+  language detection — an explicit source language is required.
 - **mlx-whisper**: MLX-accelerated Whisper for Apple Silicon. Runs natively
   on M-series GPUs. Requires [transcribe-mlx] extra.
 - **deepgram**: Uses Deepgram's Nova API for fast, accurate cloud
@@ -27,13 +32,26 @@ from typing import Any, Literal
 log = logging.getLogger(__name__)
 
 # Supported transcription methods
-TranscribeMethod = Literal["openai", "faster-whisper", "whisperx", "mlx-whisper", "deepgram"]
+TranscribeMethod = Literal[
+    "openai", "faster-whisper", "whisperx", "coherex", "mlx-whisper", "deepgram"
+]
 
 # Module-level cache for faster-whisper models — avoids reloading across runs
 _whisper_cache: dict[str, Any] = {}
 
 # Default MLX Whisper model
 DEFAULT_MLX_WHISPER_MODEL = "mlx-community/whisper-large-v3-turbo"
+
+# CohereX / Cohere Transcribe models
+DEFAULT_COHEREX_MODEL = "CohereLabs/cohere-transcribe-03-2026"
+COHEREX_ARABIC_MODEL = "CohereLabs/cohere-transcribe-arabic-07-2026"
+
+# Languages the base Cohere Transcribe model supports.  Mirrors
+# ``coherex.asr.DEFAULT_SUPPORTED_LANGUAGES``; the loaded model's own
+# ``supported_languages`` is authoritative and is checked at runtime.
+COHEREX_LANGUAGES = (
+    "en", "fr", "de", "es", "it", "pt", "nl", "pl", "el", "ar", "ja", "zh", "vi", "ko",
+)
 
 
 def build_initial_prompt(video_meta: dict | None) -> str | None:
@@ -798,6 +816,180 @@ def _transcribe_whisperx(
     return raw_segments, detected_lang
 
 
+# ── CohereX local backend ─────────────────────────────────────────────────────
+
+def resolve_coherex_model(model: str | None, language: str | None) -> str:
+    """Pick the Cohere ASR repo id for *language*.
+
+    An explicit *model* always wins.  Otherwise Arabic sources get the
+    dedicated Arabic fine-tune, which is materially better on Arabic than
+    the multilingual base model.
+    """
+    if model:
+        return model
+    if language == "ar":
+        log.info("Arabic source — using the dedicated Cohere Arabic model")
+        return COHEREX_ARABIC_MODEL
+    return DEFAULT_COHEREX_MODEL
+
+
+def _coherex_compute_type(compute_type: str, device: str) -> str:
+    """Map Mazinger's compute_type onto one CohereX accepts.
+
+    Mazinger's default (``float16``) comes from the CTranslate2 backends and
+    includes values such as ``int8_float16`` that CohereX rejects outright.
+    """
+    valid = {"default", "bfloat16", "float16", "float32"}
+    if compute_type not in valid:
+        log.info("compute_type %s not supported by CohereX — using 'default'", compute_type)
+        return "default"
+    if "cpu" in device and compute_type in {"float16", "bfloat16"}:
+        log.warning("%s is not efficient on CPU — using float32", compute_type)
+        return "float32"
+    return compute_type
+
+
+def _transcribe_coherex(
+    audio_path: str,
+    *,
+    model: str | None = None,
+    device: str = "cuda",
+    batch_size: int = 8,
+    compute_type: str = "float16",
+    language: str | None = None,
+    vad_method: str = "pyannote",
+    chunk_size: int = 30,
+    hf_token: str | None = None,
+) -> tuple[list[dict], str]:
+    """Transcribe using CohereX (Cohere Transcribe + wav2vec2 alignment).
+
+    CohereX follows the WhisperX design: VAD-chunk the audio, transcribe each
+    chunk with Cohere Transcribe, then recover word-level timings through
+    forced alignment.  The returned shape matches every other backend.
+
+    Cohere Transcribe performs **no** language detection.  When *language* is
+    omitted, CohereX's probe-based detector is used — it transcribes a short
+    clip in each candidate language and scores the results.  That costs one
+    short generate() per language, so passing an explicit language is both
+    faster and more reliable.
+
+    Requires: pip install "mazinger[transcribe-coherex]"
+
+    Returns:
+        A tuple of (segments, detected_language).
+        Each segment has 'start', 'end', 'text', and 'words' keys.
+    """
+    try:
+        import torch
+
+        # torchaudio >=2.11 removed list_audio_backends() / set_audio_backend();
+        # speechbrain (pulled in by pyannote) still references them.
+        import torchaudio
+        if not hasattr(torchaudio, "list_audio_backends"):
+            torchaudio.list_audio_backends = lambda: ["soundfile"]
+        if not hasattr(torchaudio, "set_audio_backend"):
+            torchaudio.set_audio_backend = lambda backend: None
+
+        import coherex
+    except ImportError as e:
+        raise ImportError(
+            "CohereX not installed. Install with: pip install 'mazinger[transcribe-coherex]'\n"
+            "Or use method='faster-whisper' or method='openai' instead."
+        ) from e
+
+    token = hf_token or os.environ.get("HF_TOKEN")
+    lang = None if language in (None, "auto") else language
+    model_name = resolve_coherex_model(model, lang)
+    compute_type = _coherex_compute_type(compute_type, device)
+
+    log.info(
+        "Transcribing with CohereX (model=%s, device=%s, batch=%d, compute=%s, vad=%s)",
+        model_name, device, batch_size, compute_type, vad_method,
+    )
+
+    # Step 1 -- load the ASR pipeline
+    asr = coherex.load_model(
+        model_name,
+        device=device.split(":")[0],
+        device_index=int(device.split(":")[1]) if ":" in device else 0,
+        compute_type=compute_type,
+        batch_size=batch_size,
+        vad_method=vad_method,
+        vad_options={"chunk_size": chunk_size},
+        use_auth_token=token,
+    )
+
+    try:
+        supported = list(getattr(asr, "supported_languages", COHEREX_LANGUAGES))
+
+        # Step 2 -- resolve the language (Cohere cannot detect it itself)
+        if lang is None:
+            log.warning(
+                "No source language given — probing %d candidates with CohereX. "
+                "Pass --source-language to skip this and improve accuracy.",
+                len(supported),
+            )
+            lang = coherex.detect_language(asr, audio_path, candidates=supported)
+        elif supported and lang not in supported:
+            raise ValueError(
+                f"CohereX ({model_name}) does not support language {lang!r}. "
+                f"Supported: {', '.join(supported)}. "
+                "Use --transcribe-method faster-whisper for other languages."
+            )
+        log.info("CohereX source language: %s", lang)
+
+        # Step 3 -- transcribe
+        result = asr.transcribe(
+            audio_path, language=lang, batch_size=batch_size, chunk_size=chunk_size,
+        )
+    finally:
+        # Releases a vLLM server if CohereX started one; no-op for local.
+        if hasattr(asr, "shutdown"):
+            asr.shutdown()
+
+    detected_lang = result.get("language", lang)
+    segments = result.get("segments", [])
+    log.info("CohereX transcription: %d raw segments", len(segments))
+
+    del asr
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+    # Step 4 -- word-level alignment
+    if not segments:
+        log.warning("CohereX returned no segments — nothing to align")
+        return [], detected_lang
+
+    log.info("Aligning word-level timestamps...")
+    try:
+        model_a, metadata = coherex.load_align_model(
+            language_code=detected_lang, device=device,
+        )
+        aligned = coherex.align(
+            segments, model_a, metadata, audio_path, device,
+            return_char_alignments=False,
+        )
+        raw_segments = aligned["segments"]
+
+        del model_a
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception as exc:  # noqa: BLE001 — alignment is an enhancement
+        # No wav2vec2 model for this language, or alignment failed. The VAD
+        # segments already carry usable start/end times, so degrade to
+        # segment-level timing rather than losing the transcription.
+        log.warning(
+            "Word-level alignment failed (%s) — falling back to segment-level timings",
+            exc,
+        )
+        raw_segments = segments
+
+    log.info("CohereX aligned segments: %d", len(raw_segments))
+    return raw_segments, detected_lang
+
+
 # ── MLX Whisper backend (Apple Silicon) ───────────────────────────────────────
 
 def _transcribe_mlx_whisper(
@@ -1097,23 +1289,33 @@ def transcribe(
     condition_on_previous_text: bool = True,
     vad_options: dict | None = None,
     word_timestamps: bool = True,
+    vad_method: str = "pyannote",
+    hf_token: str | None = None,
 ) -> str:
-    """Transcribe audio to SRT using OpenAI Whisper, faster-whisper, WhisperX, MLX Whisper, or Deepgram.
+    """Transcribe audio to SRT using OpenAI Whisper, faster-whisper, WhisperX, CohereX, MLX Whisper, or Deepgram.
 
     Parameters:
         audio_path:     Path to the input audio file.
         output_path:    Where to save the final SRT.
         method:         Transcription backend: ``faster-whisper`` (default),
-                        ``openai``, ``whisperx``, ``mlx-whisper``, or
-                        ``deepgram``.
+                        ``openai``, ``whisperx``, ``coherex``, ``mlx-whisper``,
+                        or ``deepgram``.
         model:          Model name. Defaults to ``whisper-1`` for OpenAI,
                         ``large-v3`` for faster-whisper/WhisperX,
-                        ``nova-3`` for Deepgram.
+                        ``nova-3`` for Deepgram, and the Cohere Transcribe base
+                        model (or the Arabic fine-tune for Arabic) for CohereX.
         device:         ``cuda`` or ``cpu`` (local methods only).
         batch_size:     Inference batch size (local methods only).
         compute_type:   ``float16``, ``int8``, or ``int8_float16`` (local methods).
+                        CohereX accepts ``bfloat16``/``float16``/``float32``;
+                        other values fall back to its own default.
         language:       Force a language code (e.g., ``en``, ``ar``) or ``None``
-                        for auto-detection.
+                        for auto-detection.  CohereX has no built-in detection,
+                        so ``None`` triggers its slower probe-based detector.
+        vad_method:     Voice-activity detector for CohereX: ``pyannote``
+                        (default, gated on HuggingFace) or ``silero``.
+        hf_token:       HuggingFace token for gated models (CohereX). Falls back
+                        to the ``HF_TOKEN`` environment variable.
         max_chars:      Maximum characters per subtitle segment.
         max_duration:   Maximum seconds per subtitle segment.
         skip_resegment: When ``True``, keep original segments as-is.
@@ -1137,6 +1339,9 @@ def transcribe(
 
         # Using WhisperX (requires [transcribe-whisperx] extra)
         transcribe("audio.mp3", "output.srt", method="whisperx", device="cuda")
+
+        # Using CohereX (requires [transcribe-coherex] extra + HF_TOKEN)
+        transcribe("audio.mp3", "output.srt", method="coherex", language="ar")
 
         # Using Deepgram Nova-3 (cloud, fast and accurate)
         transcribe("audio.mp3", "output.srt", method="deepgram")
@@ -1183,6 +1388,22 @@ def transcribe(
             compute_type=compute_type,
             language=language,
         )
+    elif method == "coherex":
+        if initial_prompt:
+            log.warning(
+                "initial_prompt is not supported by Cohere Transcribe — ignoring "
+                "the metadata-derived prompt for this run."
+            )
+        raw_segments, detected_lang = _transcribe_coherex(
+            audio_path,
+            model=model,
+            device=device,
+            batch_size=batch_size,
+            compute_type=compute_type,
+            language=language,
+            vad_method=vad_method,
+            hf_token=hf_token,
+        )
     elif method == "mlx-whisper":
         if beam_size is not None:
             raise ValueError(
@@ -1217,7 +1438,8 @@ def transcribe(
     else:
         raise ValueError(
             f"Unknown transcription method: {method!r}. "
-            "Use 'openai', 'faster-whisper', 'whisperx', 'mlx-whisper', or 'deepgram'."
+            "Use 'openai', 'faster-whisper', 'whisperx', 'coherex', 'mlx-whisper', "
+            "or 'deepgram'."
         )
 
     log.info("Transcription complete: %d segments, language=%s", len(raw_segments), detected_lang)

@@ -1,11 +1,12 @@
 """Helper classes and functions for Mazinger Studio."""
 
 import logging
+import os
 import subprocess as sp
 import threading
 import time
 
-from mazinger.studio.constants import OLLAMA_DEFAULT_MODEL
+from mazinger.studio.constants import GATED_MODELS, OLLAMA_DEFAULT_MODEL
 
 
 class LogCollector(logging.Handler):
@@ -211,3 +212,185 @@ def free_gpu_and_restart_ollama() -> str:
         pass
 
     return "\n".join(msgs) if msgs else "Done (no actions needed)"
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  HuggingFace authentication
+# ═══════════════════════════════════════════════════════════════════════
+#
+# ``huggingface_hub.notebook_login()`` renders its prompt through
+# ``IPython.display`` into a notebook output cell, and falls back to a
+# blocking terminal prompt when IPython is absent.  Neither reaches a Gradio
+# UI — and a shared Gradio link has no notebook to draw into at all.  So the
+# Studio drives the same OAuth device-code flow that ``notebook_login()``
+# uses internally, and renders it inside the app instead.
+
+_HF_MODEL_LINKS = "\n".join(
+    f"- [{label}](https://huggingface.co/{repo})" for label, repo in GATED_MODELS
+)
+
+_ACCESS_HINT = (
+    "Signing in is not enough on its own — open each gated model once and "
+    "click **Agree and access repository**:\n\n" + _HF_MODEL_LINKS
+)
+
+
+def _apply_token(token: str) -> None:
+    """Make *token* visible to every part of Mazinger that reads it."""
+    os.environ["HF_TOKEN"] = token
+    # mazinger.profiles captures HF_TOKEN into a module global at import
+    # time, so setting the environment variable alone would not reach it.
+    try:
+        from mazinger import profiles
+        profiles.HF_TOKEN = token
+    except Exception:  # noqa: BLE001 — auth must not break on an import error
+        pass
+
+
+def hf_status() -> str:
+    """Return a Markdown line describing the current HuggingFace login."""
+    try:
+        from huggingface_hub import get_token, whoami
+    except ImportError:
+        return "⚠️  `huggingface_hub` is not installed."
+
+    token = get_token() or os.environ.get("HF_TOKEN")
+    if not token:
+        return "🔒  **Not signed in.** Gated models (Cohere Transcribe) will fail to download."
+
+    _apply_token(token)
+    try:
+        user = whoami(token=token)
+        return f"✅  Signed in as **{user.get('name', 'unknown')}**."
+    except Exception as exc:  # noqa: BLE001 — expired/invalid token
+        return f"⚠️  A token is set but could not be verified: {exc}"
+
+
+def hf_login_flow():
+    """Drive the Hub's device-code login, yielding Markdown status updates.
+
+    Used as a Gradio generator handler so the verification code appears
+    immediately and the panel keeps updating while we wait for the user to
+    authorise in another tab.
+    """
+    try:
+        from huggingface_hub import get_token, login, whoami
+    except ImportError:
+        yield "⚠️  `huggingface_hub` is not installed. Run `pip install huggingface_hub`."
+        return
+
+    existing = get_token() or os.environ.get("HF_TOKEN")
+    if existing:
+        _apply_token(existing)
+        try:
+            user = whoami(token=existing)
+            yield (f"✅  Already signed in as **{user.get('name', 'unknown')}**. "
+                   f"Use *Sign out* to switch accounts.\n\n{_ACCESS_HINT}")
+            return
+        except Exception:  # noqa: BLE001 — stale token, fall through to re-login
+            pass
+
+    try:
+        from huggingface_hub._login import poll_device_token, request_device_code
+    except ImportError:
+        yield ("⚠️  This version of `huggingface_hub` has no device-code login. "
+               "Paste an access token below instead — "
+               "[create one here](https://huggingface.co/settings/tokens).")
+        return
+
+    try:
+        info = request_device_code()
+    except Exception as exc:  # noqa: BLE001 — offline, proxy, endpoint down
+        yield (f"⚠️  Could not start HuggingFace login: {exc}\n\n"
+               "Paste an access token below instead — "
+               "[create one here](https://huggingface.co/settings/tokens).")
+        return
+
+    uri = info.get("verification_uri_complete") or info["verification_uri"]
+    code = info["user_code"]
+    panel = (
+        f"### 👉  [Open this link to authorise]({uri})\n\n"
+        f"Then confirm this code:\n\n## `{code}`\n\n"
+    )
+
+    # Show the link and code before polling starts — otherwise a fast
+    # authorisation could resolve the flow without the user ever seeing them.
+    yield panel + "⏳  Waiting for authorisation…"
+
+    result: dict = {}
+
+    def _poll() -> None:
+        try:
+            result["token"] = poll_device_token(info)["access_token"]
+        except Exception as exc:  # noqa: BLE001 — denied, expired, network
+            result["error"] = exc
+
+    worker = threading.Thread(target=_poll, daemon=True)
+    worker.start()
+
+    deadline = time.monotonic() + info.get("expires_in", 900)
+    while worker.is_alive() and time.monotonic() < deadline:
+        worker.join(timeout=2)
+        if worker.is_alive():
+            yield panel + (
+                f"⏳  Waiting for authorisation… "
+                f"({int(deadline - time.monotonic())}s left)"
+            )
+
+    if "token" in result:
+        token = result["token"]
+        try:
+            login(token=token, add_to_git_credential=False)
+        except Exception as exc:  # noqa: BLE001 — cache write failed
+            log_msg = f" (token not persisted to disk: {exc})"
+        else:
+            log_msg = ""
+        _apply_token(token)
+        try:
+            name = whoami(token=token).get("name", "unknown")
+        except Exception:  # noqa: BLE001
+            name = "unknown"
+        yield f"✅  Signed in as **{name}**.{log_msg}\n\n{_ACCESS_HINT}"
+    elif "error" in result:
+        yield f"❌  Login failed: {result['error']}"
+    else:
+        yield "❌  Login timed out. Click **Sign in with Hugging Face** to try again."
+
+
+def hf_login_with_token(token: str) -> str:
+    """Sign in with a pasted access token (fallback for the device flow)."""
+    token = (token or "").strip()
+    if not token:
+        return "⚠️  Paste an access token first."
+    try:
+        from huggingface_hub import login, whoami
+    except ImportError:
+        return "⚠️  `huggingface_hub` is not installed."
+
+    try:
+        name = whoami(token=token).get("name", "unknown")
+    except Exception as exc:  # noqa: BLE001 — invalid token
+        return f"❌  That token was rejected: {exc}"
+
+    try:
+        login(token=token, add_to_git_credential=False)
+    except Exception:  # noqa: BLE001 — non-fatal, env var still applies
+        pass
+    _apply_token(token)
+    return f"✅  Signed in as **{name}**.\n\n{_ACCESS_HINT}"
+
+
+def hf_logout() -> str:
+    """Forget the stored HuggingFace token."""
+    os.environ.pop("HF_TOKEN", None)
+    try:
+        from mazinger import profiles
+        profiles.HF_TOKEN = None
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        from huggingface_hub import logout
+        logout()
+    except Exception:  # noqa: BLE001 — nothing stored on disk
+        pass
+    return "🔒  Signed out."

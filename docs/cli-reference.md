@@ -37,8 +37,10 @@ mazinger dub <source> [options]
 | `--voice-theme` | — | Pre-defined voice theme (e.g. `narrator-m`, `warm-f`). See `mazinger profile list` |
 | `--voice-sample` | — | Path to reference voice audio file |
 | `--voice-script` | — | Path to transcript of the voice sample (or inline text) |
-| `--transcribe-method` | `faster-whisper` | `openai`, `faster-whisper`, `whisperx`, `mlx-whisper`, or `deepgram` |
-| `--whisper-model` | varies by method | Whisper/Deepgram model name |
+| `--transcribe-method` | `faster-whisper` | `openai`, `faster-whisper`, `whisperx`, `coherex`, `mlx-whisper`, or `deepgram` |
+| `--whisper-model` | varies by method | Whisper/Deepgram/CohereX model name |
+| `--vad-method` | `pyannote` | Voice-activity detector for CohereX: `pyannote` or `silero` |
+| `--hf-token` | `$HF_TOKEN` | HuggingFace token for gated models (CohereX) |
 | `--mlx-whisper-model` | `mlx-community/whisper-large-v3-turbo` | MLX Whisper model name |
 | `--beam-size` | — | Beam size for decoding (faster-whisper/whisperx) |
 | `--deepgram-api-key` | `$DEEPGRAM_API_KEY` | Deepgram API key (required for `--transcribe-method deepgram`) |
@@ -193,8 +195,10 @@ If `source` is provided, the video is downloaded first and its audio is transcri
 |------|---------|-------------|
 | `--audio` | — | Path to audio file (overrides source) |
 | `-o`, `--output` | — | Output SRT path |
-| `--method` | `faster-whisper` | `openai`, `faster-whisper`, `whisperx`, `mlx-whisper`, or `deepgram` |
-| `--model` | varies | Model name (`whisper-1` for OpenAI, `large-v3` for local, `nova-3` for Deepgram) |
+| `--method` | `faster-whisper` | `openai`, `faster-whisper`, `whisperx`, `coherex`, `mlx-whisper`, or `deepgram` |
+| `--model` | varies | Model name (`whisper-1` for OpenAI, `large-v3` for local, `nova-3` for Deepgram, `CohereLabs/cohere-transcribe-03-2026` for CohereX) |
+| `--vad-method` | `pyannote` | Voice-activity detector for CohereX: `pyannote` or `silero` |
+| `--hf-token` | `$HF_TOKEN` | HuggingFace token for gated models (CohereX) |
 | `--device` | `auto` | `auto`, `cuda`, `cpu` |
 | `--batch-size` | `16` | Batch size for local transcription |
 | `--compute-type` | `float16` | Weight precision: `float16`, `int8`, `int8_float16` |

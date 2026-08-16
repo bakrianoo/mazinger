@@ -53,12 +53,13 @@ A local URL opens in your browser. Paste a video link, pick a voice, and click *
 |---|---|
 | Local transcription (default) | Faster Whisper |
 | Cloud transcription (no GPU) | Deepgram Nova 3 — $200 free credit |
+| Local transcription (14 languages, Arabic model) | CohereX — Cohere Transcribe + wav2vec2 |
 | Voice-cloned TTS | Qwen3-TTS, OmniVoice (24 languages) |
 | Background-audio separation | Demucs |
 | Web UI | Gradio (Mazinger Studio) |
 | Local LLM (optional) | Ollama (auto-installed by `mazinger web`) |
 
-Need Chatterbox, MLX (Apple Silicon), or a minimal install? See the [Installation Guide](docs/installation.md).
+Need CohereX, Chatterbox, MLX (Apple Silicon), or a minimal install? See the [Installation Guide](docs/installation.md).
 
 ---
 
@@ -116,6 +117,30 @@ mazinger dub "https://youtube.com/watch?v=VIDEO_ID" \
 ```
 
 See [Subtitle Styling](docs/subtitle-styling.md) for fonts, colors, positioning, and RTL options.
+
+### Transcribe with CohereX (Cohere Transcribe)
+
+14 languages with word-level alignment, plus a dedicated Arabic model that is
+selected automatically for Arabic sources. Requires `HF_TOKEN` — the Cohere
+models are gated on HuggingFace — sign in from the Studio's Hugging Face panel,
+or set `HF_TOKEN`.
+
+In the Studio, open **🤗 Hugging Face → Sign in with Hugging Face** and follow
+the link it shows — no token to copy. From the CLI, set `HF_TOKEN` instead.
+
+```bash
+uv pip install "mazinger[all,transcribe-coherex]"
+export HF_TOKEN=hf_your_token
+
+mazinger dub "https://youtube.com/watch?v=VIDEO_ID" \
+    --transcribe-method coherex \
+    --source-language Arabic \
+    --voice-theme narrator-m \
+    --target-language English
+```
+
+> ⚠️ Cohere Transcribe cannot detect the source language and will transcribe
+> confidently in whatever language you give it. Always pass `--source-language`.
 
 ### Use Deepgram instead of a local GPU
 
