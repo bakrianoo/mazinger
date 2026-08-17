@@ -4,7 +4,7 @@ import gradio as gr
 
 from constants import (
     LANGUAGES, QWEN_LANGUAGES, OMNIVOICE_LANGUAGES,
-    VOICE_PRESETS, METHOD_MAP, OLLAMA_DEFAULT_MODEL,
+    VOICE_PRESETS, METHOD_MAP, DEFAULT_TRANSCRIBE_LABEL, OLLAMA_DEFAULT_MODEL,
     SEGMENT_MODE_MAP, THEME_CHOICES, VOICE_THEMES,
 )
 from theme import theme, CSS
@@ -390,9 +390,9 @@ with gr.Blocks(theme=theme, title="Mazinger Studio", css=CSS) as app:
             with gr.Tab("📝 Transcription"):
                 transcribe_method = gr.Dropdown(
                     list(METHOD_MAP.keys()),
-                    value="Faster Whisper (local GPU)",
+                    value=DEFAULT_TRANSCRIBE_LABEL,
                     label="Transcription method",
-                    info="Cloud = needs OpenAI key  •  Local = faster, requires GPU",
+                    info="CohereX = local GPU (default), 14 languages incl. a dedicated Arabic model — needs Hugging Face sign-in  •  Faster Whisper = local GPU, any language, no sign-in  •  Cloud options need an API key",
                 )
                 whisper_model = gr.Textbox(
                     label="Model override",

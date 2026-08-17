@@ -17,11 +17,58 @@ from __future__ import annotations
 import json
 import logging
 import threading
+import urllib.error
 import urllib.request
 from typing import Any, Callable
 from urllib.parse import urlparse
 
 log = logging.getLogger(__name__)
+
+
+class OllamaRequestError(RuntimeError):
+    """An Ollama HTTP call failed, carrying the server's own explanation."""
+
+
+def _urlopen(req: urllib.request.Request, timeout: float | None = None):
+    """``urlopen`` that preserves Ollama's error message.
+
+    Ollama explains every failure in the response body as ``{"error": "..."}``
+    — the model is not pulled, it needs more memory than is available, the
+    context is too long, the runner died.  ``urlopen`` raises ``HTTPError``
+    *without* reading that body, so the caller is left with a bare
+    "HTTP Error 500: Internal Server Error" and no way to tell those apart.
+    A pipeline that dies after transcription has already run deserves better
+    than that, so unpack the body here.
+    """
+    try:
+        if timeout is None:
+            return urllib.request.urlopen(req)
+        return urllib.request.urlopen(req, timeout=timeout)
+    except urllib.error.HTTPError as exc:
+        detail = ""
+        try:
+            raw = exc.read().decode("utf-8", errors="replace").strip()
+        except Exception:  # body already consumed or unreadable
+            raw = ""
+        if raw:
+            try:
+                parsed = json.loads(raw)
+                detail = parsed.get("error") if isinstance(parsed, dict) else ""
+                detail = detail or raw
+            except json.JSONDecodeError:
+                detail = raw
+        message = f"Ollama returned HTTP {exc.code} for {req.full_url}"
+        if detail:
+            message += f": {detail[:500]}"
+        else:
+            message += " (no detail in the response body)"
+        raise OllamaRequestError(message) from exc
+    except urllib.error.URLError as exc:
+        raise OllamaRequestError(
+            f"Could not reach the Ollama server at {req.full_url} ({exc.reason}). "
+            "Start it with `ollama serve`, or point OLLAMA_HOST at the right host."
+        ) from exc
+
 
 # -- Global stream callback ------------------------------------------------
 
@@ -188,7 +235,7 @@ class _OllamaChatCompletions:
 
         if not callback:
             # Non-streaming path (original behaviour)
-            with urllib.request.urlopen(req) as resp:
+            with _urlopen(req) as resp:
                 result = json.loads(resp.read())
 
             content = result.get("message", {}).get("content", "")
@@ -199,7 +246,7 @@ class _OllamaChatCompletions:
             content_parts: list[str] = []
             prompt_tokens = 0
             eval_tokens = 0
-            with urllib.request.urlopen(req) as resp:
+            with _urlopen(req) as resp:
                 for raw_line in resp:
                     line = raw_line.decode("utf-8", errors="replace").strip()
                     if not line:
@@ -248,7 +295,7 @@ class _OllamaClient:
             headers={"Content-Type": "application/json"},
         )
         try:
-            with urllib.request.urlopen(req, timeout=10) as resp:
+            with _urlopen(req, timeout=10) as resp:
                 resp.read()
             log.info("Ollama model %s unloaded from GPU", model)
         except Exception:

@@ -6,7 +6,7 @@ import gradio as gr
 
 from mazinger.studio.constants import (
     LANGUAGES, QWEN_LANGUAGES, OMNIVOICE_LANGUAGES,
-    VOICE_PRESETS, METHOD_MAP, OLLAMA_DEFAULT_MODEL,
+    VOICE_PRESETS, METHOD_MAP, DEFAULT_TRANSCRIBE_LABEL, OLLAMA_DEFAULT_MODEL,
     SEGMENT_MODE_MAP, THEME_CHOICES, VOICE_THEMES,
 )
 from mazinger.studio.theme import theme, CSS
@@ -426,9 +426,9 @@ with gr.Blocks(title="Mazinger Studio", theme=theme, css=CSS) as app:
             with gr.Tab("📝 Transcription"):
                 transcribe_method = gr.Dropdown(
                     list(METHOD_MAP.keys()),
-                    value="Faster Whisper (local GPU)",
+                    value=DEFAULT_TRANSCRIBE_LABEL,
                     label="Transcription method",
-                    info="Faster Whisper = local GPU (default)  •  CohereX = local GPU, 14 languages, needs Hugging Face sign-in + a source language  •  Deepgram = cloud (set DEEPGRAM_API_KEY)  •  OpenAI = cloud (uses your OpenAI key)",
+                    info="CohereX = local GPU (default), 14 languages incl. a dedicated Arabic model — needs Hugging Face sign-in, and picking a source language below makes it faster and more accurate  •  Faster Whisper = local GPU, any language, no sign-in  •  Deepgram = cloud (set DEEPGRAM_API_KEY)  •  OpenAI = cloud (uses your OpenAI key)",
                 )
                 whisper_model = gr.Textbox(
                     label="Model override",

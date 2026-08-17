@@ -94,7 +94,7 @@ TTS synthesis has finer granularity — individual segment WAVs (`seg_0001.wav`,
 - Need offline processing → pick `faster-whisper` (default)
 - Need word-level alignment → pick `whisperx` with Qwen TTS (requires `transcribe-whisperx` extra)
 - Transcribing Arabic → pick `coherex`, which auto-selects the dedicated Cohere Arabic model
-- Transcribing one of CohereX's 14 languages → pick `coherex` for word-level alignment without the Chatterbox conflict (requires `transcribe-coherex` extra)
+- Transcribing one of CohereX's 14 languages → pick `coherex` for word-level alignment without the Chatterbox conflict (in `mazinger[all]`; the Studio already defaults to it)
 
 ### CohereX
 

@@ -53,15 +53,21 @@ A local URL opens in your browser. Paste a video link, pick a voice, and click *
 
 | Capability | Engine |
 |---|---|
-| Local transcription (default) | Faster Whisper |
+| Local transcription — 14 languages + a dedicated Arabic model | CohereX — Cohere Transcribe + wav2vec2 (**Studio default**) |
+| Local transcription — any language, no sign-in | Faster Whisper (CLI default) |
 | Cloud transcription (no GPU) | Deepgram Nova 3 — $200 free credit |
-| Local transcription (14 languages, Arabic model) | CohereX — Cohere Transcribe + wav2vec2 |
 | Voice-cloned TTS | Qwen3-TTS, OmniVoice (24 languages) |
 | Background-audio separation | Demucs |
 | Web UI | Gradio (Mazinger Studio) |
 | Local LLM (optional) | Ollama (auto-installed by `mazinger web`) |
 
-Need CohereX, Chatterbox, MLX (Apple Silicon), or a minimal install? See the [Installation Guide](docs/installation.md).
+> **CohereX needs a one-time Hugging Face sign-in** — the Cohere models are
+> gated. In the Studio, open **🤗 Hugging Face → Sign in with Hugging Face**;
+> from the CLI, set `HF_TOKEN`. Not signed in, or working in a language CohereX
+> does not cover? Switch the transcription method to **Faster Whisper**, which
+> needs neither.
+
+Need Chatterbox, MLX (Apple Silicon), or a lighter install? See the [Installation Guide](docs/installation.md) — `mazinger[all]` now bundles CohereX, which brings the pyannote stack with it (~50 extra packages).
 
 ---
 
@@ -123,15 +129,17 @@ See [Subtitle Styling](docs/subtitle-styling.md) for fonts, colors, positioning,
 ### Transcribe with CohereX (Cohere Transcribe)
 
 14 languages with word-level alignment, plus a dedicated Arabic model that is
-selected automatically for Arabic sources. Requires `HF_TOKEN` — the Cohere
-models are gated on HuggingFace — sign in from the Studio's Hugging Face panel,
-or set `HF_TOKEN`.
+selected automatically for Arabic sources. Included in `mazinger[all]`, and the
+**default in Mazinger Studio** — nothing to install separately.
 
-In the Studio, open **🤗 Hugging Face → Sign in with Hugging Face** and follow
-the link it shows — no token to copy. From the CLI, set `HF_TOKEN` instead.
+The Cohere models are gated on HuggingFace, so it needs a one-time sign-in. In
+the Studio, open **🤗 Hugging Face → Sign in with Hugging Face** and follow the
+link it shows — no token to copy. From the CLI, set `HF_TOKEN` instead.
+
+The CLI still defaults to Faster Whisper; pass `--transcribe-method coherex` to
+use CohereX there:
 
 ```bash
-uv pip install "mazinger[all,transcribe-coherex]"
 export HF_TOKEN=hf_your_token
 
 mazinger dub "https://youtube.com/watch?v=VIDEO_ID" \
@@ -141,8 +149,10 @@ mazinger dub "https://youtube.com/watch?v=VIDEO_ID" \
     --target-language English
 ```
 
-> ⚠️ Cohere Transcribe cannot detect the source language and will transcribe
-> confidently in whatever language you give it. Always pass `--source-language`.
+> ⚠️ Cohere Transcribe cannot detect the source language on its own. Given one,
+> it transcribes confidently in whatever language you name; given none, it
+> probes each supported language first, which is slower and less reliable.
+> Always pass `--source-language` (or pick one in the Studio).
 
 ### Use Deepgram instead of a local GPU
 

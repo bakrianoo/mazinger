@@ -116,16 +116,17 @@ all-chatterbox = [
 all-omnivoice = [
     "mazinger[transcribe-faster,tts-omnivoice,audio-enhance]",
 ]
-# Full pipeline with CohereX transcription + Qwen/OmniVoice TTS.
-# Kept out of [all]: CohereX pulls the pyannote/lightning stack (~50 extra
-# packages) that most users never touch.  It resolves cleanly alongside
-# [all] though, so the two can be combined: mazinger[all,transcribe-coherex]
+# Retained as an alias — CohereX is part of [all] now, so this resolves to the
+# same set.  Kept so existing install commands and docs keep working.
 all-coherex = [
-    "mazinger[transcribe-coherex,transcribe-faster,tts,tts-omnivoice,audio-enhance,web]",
+    "mazinger[all]",
 ]
 # Default recommended bundle — everything needed to run the full Mazinger
 # pipeline and the Studio web UI:
-#   • Faster Whisper (local GPU transcription, default)
+#   • CohereX        (local GPU transcription, default — 14 languages plus a
+#                     dedicated Arabic model; the gated Cohere weights need a
+#                     Hugging Face sign-in the first time)
+#   • Faster Whisper (local GPU transcription, any language, no sign-in)
 #   • Deepgram Nova 3 (cloud transcription, no GPU required)
 #   • Qwen3-TTS  (voice-cloned synthesis with reference audio + transcript)
 #   • OmniVoice  (24 languages, zero-shot voice cloning)
@@ -133,8 +134,12 @@ all-coherex = [
 #   • Gradio     (Mazinger Studio web UI)
 # Compatible in a single environment.  Excludes Chatterbox and MLX (which
 # require dedicated environments — see docs/installation.md).
+#
+# CohereX brings the pyannote/lightning stack with it (~50 extra packages), so
+# [all] is a heavier install than it used to be; use the narrower extras above
+# if that matters — e.g. mazinger[transcribe-faster,tts,web].
 all = [
-    "mazinger[transcribe-faster,transcribe-deepgram,tts,tts-omnivoice,audio-enhance,web]",
+    "mazinger[transcribe-coherex,transcribe-faster,transcribe-deepgram,tts,tts-omnivoice,audio-enhance,web]",
 ]
 # TTS with MLX Qwen3-TTS for Apple Silicon
 tts-mlx = [

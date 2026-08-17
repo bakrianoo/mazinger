@@ -12,7 +12,8 @@ This bundles a single, mutually-compatible set of engines:
 
 | Component | Purpose |
 |-----------|---------|
-| `faster-whisper` | Local GPU transcription (default) |
+| `coherex` | Local GPU transcription — 14 languages + a dedicated Arabic model (**Studio default**; needs a one-time Hugging Face sign-in) |
+| `faster-whisper` | Local GPU transcription — any language, no sign-in (CLI default) |
 | `deepgram-sdk` | Cloud transcription via Deepgram Nova 3 ($200 free credit, no GPU) |
 | Qwen3-TTS | Voice-cloned TTS (reference audio + transcript) — vendored, no separate package |
 | `omnivoice` | 24-language zero-shot voice cloning TTS |
@@ -48,7 +49,7 @@ The extras below are for users who need an engine **not** included in `[all]`, o
 ```bash
 pip install "mazinger[transcribe-faster]"      # faster-whisper — CTranslate2, ~4× faster than Whisper
 pip install "mazinger[transcribe-whisperx]"    # WhisperX — best word-level alignment via wav2vec2
-pip install "mazinger[transcribe-coherex]"     # CohereX — Cohere Transcribe + wav2vec2 (14 languages, Arabic model)
+pip install "mazinger[transcribe-coherex]"     # CohereX alone — Cohere Transcribe + wav2vec2 (already in [all])
 ```
 
 Both require a CUDA GPU (or can fall back to CPU at reduced speed).
@@ -94,21 +95,41 @@ Qwen, Chatterbox, and MLX pull different versions of `transformers` and cannot c
 
 | Extra | transformers | Compatible with |
 |-------|-------------|-----------------|
-| `tts` (Qwen) | ≥ 4.48 | `transcribe-faster`, `transcribe-whisperx`, `transcribe-coherex` |
-| `tts-chatterbox` | == 4.46.3 | `transcribe-faster`, OpenAI transcription || `tts-omnivoice` | (omnivoice) | `transcribe-faster`, `transcribe-whisperx`, `transcribe-coherex` || `tts-mlx` | (mlx-audio) | `transcribe-mlx` |
+| `tts` (Qwen) | ≥ 5.4 | `transcribe-faster`, `transcribe-whisperx`, `transcribe-coherex` |
+| `tts-chatterbox` | == 4.46.3 | `transcribe-faster`, OpenAI transcription |
+| `tts-omnivoice` | (omnivoice) | `transcribe-faster`, `transcribe-whisperx`, `transcribe-coherex` |
+| `tts-mlx` | (mlx-audio) | `transcribe-mlx` |
 | `transcribe-coherex` | ≥ 5.4 | `tts`, `tts-omnivoice`, `transcribe-faster` (not `tts-chatterbox`) |
 | `all-mlx` | (mlx-audio + mlx-whisper) | Apple Silicon only |
 
 WhisperX requires `transformers>=4.48`, so it conflicts with Chatterbox. When using Chatterbox, choose `transcribe-faster` or the cloud-based OpenAI transcription.
 
 CohereX requires `transformers>=5.4`, which matches what Qwen TTS and OmniVoice
-already resolve to. It adds roughly 50 packages (the pyannote/lightning stack),
-so it is kept out of `mazinger[all]` — but it resolves cleanly alongside it:
+already resolve to. **It is included in `mazinger[all]`** and is the default
+transcription backend in Mazinger Studio, so no separate install step is needed:
 
 ```bash
-uv pip install "mazinger[all,transcribe-coherex]"   # or: mazinger[all-coherex]
+uv pip install "mazinger[all]"    # includes CohereX
 ```
-> **Note:** `faster-whisper` is the recommended default for local transcription. It is lightweight, easy to install, and compatible with all TTS engines. WhisperX is still available as an optional extra (`transcribe-whisperx`) for users who need word-level alignment via wav2vec2.
+
+It brings the pyannote/lightning stack with it — roughly 50 extra packages, so
+`mazinger[all]` resolves to ~183 packages rather than ~129. If that matters,
+install only what you need instead:
+
+```bash
+uv pip install "mazinger[transcribe-faster,tts,web]"   # no CohereX, no pyannote
+```
+
+`mazinger[all-coherex]` still works; it is now an alias for `mazinger[all]`.
+
+> **Two things to know about CohereX.** The Cohere models are gated on
+> HuggingFace, so it needs a one-time sign-in (Studio: **🤗 Hugging Face → Sign
+> in**; CLI: `HF_TOKEN`). And it cannot detect the source language on its own —
+> always give it one. For any language outside its 14, or to skip the sign-in
+> entirely, choose `faster-whisper`: lightweight, no gating, works with every
+> TTS engine, and still the CLI default. WhisperX remains available
+> (`transcribe-whisperx`) for word-level alignment via wav2vec2.
+
 ## What Each Task Requires
 
 | Task | Command | Core install | Extra needed |
@@ -118,7 +139,7 @@ uv pip install "mazinger[all,transcribe-coherex]"   # or: mazinger[all-coherex]
 | Transcribe (cloud, Deepgram) | `mazinger transcribe --method deepgram` | no | `transcribe-deepgram` + Deepgram API |
 | Transcribe (local) | `mazinger transcribe --method faster-whisper` | no | `transcribe-faster` + CUDA |
 | Transcribe (local) | `mazinger transcribe --method whisperx` | no | `transcribe-whisperx` + CUDA |
-| Transcribe (local) | `mazinger transcribe --method coherex` | no | `transcribe-coherex` + CUDA + HuggingFace sign-in |
+| Transcribe (local) | `mazinger transcribe --method coherex` | no | in `[all]` + CUDA + HuggingFace sign-in |
 | Transcribe (MLX) | `mazinger transcribe --method mlx-whisper` | no | `transcribe-mlx` + Apple Silicon |
 | Thumbnails | `mazinger thumbnails` | yes | — |
 | Describe | `mazinger describe` | yes | — |

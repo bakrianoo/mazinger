@@ -15,6 +15,7 @@ import logging
 import os
 import shutil
 import subprocess
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -23,6 +24,12 @@ log = logging.getLogger(__name__)
 
 DEFAULT_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3.5:2b-q8_0")
 DEFAULT_TRANSLATION_MODEL = "translategemma"
+
+#: Where the Ollama server's own output is kept when Mazinger starts it.
+#: A 5xx from ``/api/chat`` is explained here and nowhere else.
+SERVER_LOG = os.environ.get(
+    "OLLAMA_SERVER_LOG", os.path.join(tempfile.gettempdir(), "mazinger-ollama.log"),
+)
 
 _INSTALL_URL = "https://ollama.com/install.sh"
 _PULL_TIMEOUT = int(os.environ.get("OLLAMA_PULL_TIMEOUT", "1800"))
@@ -194,13 +201,20 @@ def start_server(progress=None, retries: int = 15, delay: float = 2) -> None:
     install(progress)
 
     _report(progress, "Starting Ollama server…")
+    # Keep the server's output: when a request later fails with a 5xx, the
+    # runner's own traceback is the only place the reason is recorded, and
+    # discarding it leaves nothing to debug with.
     try:
-        subprocess.Popen(
-            ["ollama", "serve"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        )
+        log_handle = open(SERVER_LOG, "a", buffering=1)
+    except OSError:
+        log_handle = subprocess.DEVNULL
+        log.debug("Could not open %s for the Ollama server log", SERVER_LOG)
+    try:
+        subprocess.Popen(["ollama", "serve"], stdout=log_handle, stderr=subprocess.STDOUT)
     except OSError as exc:
         raise OllamaSetupError(f"Could not start the Ollama server: {exc}. {_FALLBACK_HINT}") from exc
+    else:
+        _report(progress, f"Ollama server log: {SERVER_LOG}")
 
     for _ in range(retries):
         if is_running():

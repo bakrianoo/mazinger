@@ -67,12 +67,17 @@ for _group_items in VOICE_THEMES.values():
 
 QUALITY_MAP = {"Low (360p)": "low", "Medium (720p)": "medium", "High (best)": "high"}
 
+# Order matters: the Studio dropdown lists these as-is and uses the first
+# entry as its default.
 METHOD_MAP = {
-    "OpenAI Whisper (cloud)": "openai",
-    "Faster Whisper (local GPU)": "faster-whisper",
-    "WhisperX (local GPU)": "whisperx",
     "CohereX (local GPU, 14 languages)": "coherex",
+    "Faster Whisper (local GPU)": "faster-whisper",
+    "OpenAI Whisper (cloud)": "openai",
+    "WhisperX (local GPU)": "whisperx",
 }
+
+#: The Studio's default transcription backend.
+DEFAULT_TRANSCRIBE_LABEL = next(iter(METHOD_MAP))
 
 # Source languages CohereX can transcribe.  Other languages must use a
 # Whisper-family backend — Cohere Transcribe would otherwise transcribe

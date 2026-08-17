@@ -855,6 +855,40 @@ def _coherex_compute_type(compute_type: str, device: str) -> str:
     return compute_type
 
 
+def _require_hf_credentials(explicit_token: str | None) -> None:
+    """Fail early, and legibly, when the gated Cohere weights are unreachable.
+
+    CohereX is the default backend in Mazinger Studio, so this is the first
+    thing a new user hits — and without a check the failure surfaces as a raw
+    HuggingFace 401/403 from deep inside the model loader, after the download
+    stage has already run.
+
+    A stored login counts: signing in through the Studio's Hugging Face panel
+    writes a token that ``huggingface_hub`` picks up on its own, so this must
+    consult the *effective* credential rather than just ``HF_TOKEN``.
+    """
+    if explicit_token:
+        return
+    try:
+        from huggingface_hub import get_token
+    except ImportError:  # very old hub; let the loader speak instead
+        return
+    if get_token():
+        return
+    raise RuntimeError(
+        "CohereX needs a Hugging Face sign-in: the Cohere Transcribe weights are "
+        "gated, and no credentials were found.\n"
+        "  • Mazinger Studio — open the '🤗 Hugging Face' panel and click "
+        "'Sign in with Hugging Face'.\n"
+        "  • CLI — set HF_TOKEN, or pass --hf-token.\n"
+        "You also have to accept the terms once on each model page "
+        "(CohereLabs/cohere-transcribe-03-2026, and the Arabic model for Arabic "
+        "sources).\n"
+        "To skip this entirely, use --transcribe-method faster-whisper, which "
+        "needs no sign-in."
+    )
+
+
 def _transcribe_coherex(
     audio_path: str,
     *,
@@ -904,6 +938,7 @@ def _transcribe_coherex(
         ) from e
 
     token = hf_token or os.environ.get("HF_TOKEN")
+    _require_hf_credentials(token)
     lang = None if language in (None, "auto") else language
     model_name = resolve_coherex_model(model, lang)
     compute_type = _coherex_compute_type(compute_type, device)
