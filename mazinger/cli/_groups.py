@@ -249,8 +249,9 @@ def add_transcription(p: argparse.ArgumentParser) -> None:
         "--beam-size",
         type=int,
         default=None,
-        help="Beam size for decoding when supported by the selected backend (for example, faster-whisper). "
-             "Leave unset for mlx-whisper.",
+        help="Beam size for decoding when supported by the selected backend "
+             "(faster-whisper, whisperx); defaults to 5 there. Must be left "
+             "unset for mlx-whisper, which decodes by sampling.",
     )
     add_deepgram(p)
 

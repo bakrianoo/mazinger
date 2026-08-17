@@ -14,7 +14,7 @@ This bundles a single, mutually-compatible set of engines:
 |-----------|---------|
 | `faster-whisper` | Local GPU transcription (default) |
 | `deepgram-sdk` | Cloud transcription via Deepgram Nova 3 ($200 free credit, no GPU) |
-| `qwen-tts` | Voice-cloned TTS (reference audio + transcript) |
+| Qwen3-TTS | Voice-cloned TTS (reference audio + transcript) — vendored, no separate package |
 | `omnivoice` | 24-language zero-shot voice cloning TTS |
 | `demucs` | Background-audio separation for clean voice mixing |
 | `gradio` | Mazinger Studio web UI |
@@ -219,7 +219,20 @@ uv pip install --system \
     "mazinger[all-qwen]"
 ```
 
-The overrides prevent `chatterbox-tts` and `qwen-tts` from downgrading PyTorch and other packages that Colab ships with pre-configured CUDA support.
+The overrides prevent `chatterbox-tts` from downgrading PyTorch and other packages that Colab ships with pre-configured CUDA support.
+
+### Why Qwen3-TTS is vendored
+
+Mazinger ships its own copy of Qwen3-TTS under `mazinger/_vendor/qwen_tts`
+instead of installing the `qwen-tts` package. The published release hard-pins
+`transformers==4.57.3`, which cannot coexist with CohereX (`>=5.4`) or
+OmniVoice (`>=5.3`) in one environment — and a pin cannot be relaxed from
+outside the package. The vendored copy carries the (small) set of changes
+needed to run on transformers 5.x; they are catalogued in
+[`mazinger/_vendor/qwen_tts/NOTICE.md`](../mazinger/_vendor/qwen_tts/NOTICE.md).
+
+Nothing about this is visible at install time — `mazinger[tts]` and
+`mazinger[all]` behave exactly as before, minus the conflicting pin.
 
 ## Flash Attention (Optional)
 

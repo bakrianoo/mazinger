@@ -149,10 +149,14 @@ Tempo modes:
 
 | Mode | Behavior |
 |------|----------|
-| `auto` | Speed up segments that overflow (never slow down) |
-| `dynamic` | Per-segment speed matching, both faster and slower |
+| `auto` (default) | Per-segment matching in both directions: speed up segments that overflow their window (capped at `--max-tempo`), and slow down segments that fall well short of it |
+| `dynamic` | Currently identical to `auto` — both resolve to the same code path |
 | `fixed` | Apply a constant multiplier to all segments (e.g., 1.1×) |
 | `off` | No tempo change — place segments as-is |
+
+Slow-down never targets a 100% fill; it stretches toward a partial fill of the
+window so speech does not become sluggish, and is skipped entirely when the
+correction would be negligible.
 
 After placement, two post-processing steps run by default:
 

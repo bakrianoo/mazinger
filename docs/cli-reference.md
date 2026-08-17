@@ -65,9 +65,9 @@ mazinger dub <source> [options]
 | `--output-type` | `audio` | `audio` (WAV only) or `video` (muxed MP4) |
 | `--embed-subtitles` | off | Burn subtitles into output video (implies `--output-type video`) |
 | `--subtitle-source` | `translated` | `translated`, `original`, or path to a custom SRT file |
-| `--dynamic-tempo` | off | Per-segment speed matching |
+| `--dynamic-tempo` | off | No-op — `auto` already matches per segment in both directions |
 | `--fixed-tempo` | — | Constant speed multiplier (e.g., `1.1`) |
-| `--max-tempo` | `1.3` | Maximum speed-up for dynamic/auto tempo |
+| `--max-tempo` | `1.5` | Maximum speed-up ratio applied to overflowing segments |
 | `--no-loudness-match` | off | Skip loudness normalisation against the original audio |
 | `--no-mix-background` | off | Skip mixing background audio from the original |
 | `--background-volume` | `0.15` | Background audio mix level (0.0–1.0) |
@@ -115,11 +115,11 @@ mazinger dub "https://youtube.com/watch?v=abc123" \
     --clone-profile abubakr --target-language Arabic \
     --start 00:01:30 --end 00:05:00
 
-# Local transcription, dynamic tempo
+# Local transcription, tighter cap on how much a segment may be sped up
 mazinger dub "https://youtube.com/watch?v=abc123" \
     --clone-profile abubakr \
     --transcribe-method faster-whisper \
-    --dynamic-tempo --max-tempo 1.3
+    --max-tempo 1.3
 ```
 
 ---
@@ -390,9 +390,9 @@ mazinger speak [source] [options]
 | `--chatterbox-cfg` | `0.5` | Pacing control (0.0–1.0) |
 | `--device` | `auto` | `auto`, `cuda`, `cpu` |
 | `--dtype` | `bfloat16` | Weight dtype for Qwen: `bfloat16`, `float16`, `float32` |
-| `--dynamic-tempo` | off | Per-segment tempo matching |
+| `--dynamic-tempo` | off | No-op — `auto` already matches per segment in both directions |
 | `--fixed-tempo` | — | Constant speed multiplier |
-| `--max-tempo` | `1.3` | Maximum speed-up ratio |
+| `--max-tempo` | `1.5` | Maximum speed-up ratio |
 | `--force-reset` | off | Re-synthesize all segments from scratch |
 
 **Examples:**

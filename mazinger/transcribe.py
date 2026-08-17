@@ -42,6 +42,12 @@ _whisper_cache: dict[str, Any] = {}
 # Default MLX Whisper model
 DEFAULT_MLX_WHISPER_MODEL = "mlx-community/whisper-large-v3-turbo"
 
+# Beam width used by the beam-search backends (faster-whisper, WhisperX) when
+# the caller leaves ``beam_size`` unset.  mlx-whisper decodes by sampling and
+# rejects any beam size, which is why ``None`` — not this value — is the CLI
+# default; see ``transcribe()``.
+DEFAULT_BEAM_SIZE = 5
+
 # CohereX / Cohere Transcribe models
 DEFAULT_COHEREX_MODEL = "CohereLabs/cohere-transcribe-03-2026"
 COHEREX_ARABIC_MODEL = "CohereLabs/cohere-transcribe-arabic-07-2026"
@@ -1354,6 +1360,13 @@ def transcribe(
 
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
 
+    # ``beam_size=None`` means "unset", which is the only value mlx-whisper
+    # accepts and therefore the CLI default.  The beam-search backends need a
+    # real integer: faster-whisper hands the value straight to CTranslate2,
+    # whose ``generate()`` rejects ``None`` with a TypeError.  Resolve it here,
+    # once, so the CLI, the Python API and Studio all behave the same.
+    beam_search_beam_size = DEFAULT_BEAM_SIZE if beam_size is None else beam_size
+
     # Select backend and transcribe
     if method == "openai":
         default_model = "whisper-1"
@@ -1373,7 +1386,7 @@ def transcribe(
             batch_size=batch_size,
             compute_type=compute_type,
             language=language,
-            beam_size=beam_size,
+            beam_size=beam_search_beam_size,
             initial_prompt=initial_prompt,
             condition_on_previous_text=condition_on_previous_text,
             vad_options=vad_options,
@@ -1459,7 +1472,7 @@ def transcribe(
             return _transcribe_gap(
                 _path, _start, _end,
                 language=detected_lang,
-                beam_size=beam_size,
+                beam_size=beam_search_beam_size,
                 initial_prompt=initial_prompt,
             )
 

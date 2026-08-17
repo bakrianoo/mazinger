@@ -105,10 +105,10 @@ def _load_qwen_model(
     """Load a Qwen3-TTS model and return it."""
     import torch
 
-    from mazinger._compat import patch_qwen_tts
-
-    patch_qwen_tts()  # qwen-tts 0.1.1 vs. transformers 5.x
-    from qwen_tts import Qwen3TTSModel
+    # Vendored fork of qwen-tts 0.1.1 — the PyPI release pins
+    # transformers==4.57.3, which cannot coexist with the rest of the
+    # environment.  See mazinger/_vendor/qwen_tts/NOTICE.md.
+    from mazinger._vendor.qwen_tts import Qwen3TTSModel
 
     dtype_map = {
         "bfloat16": torch.bfloat16,

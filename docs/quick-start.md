@@ -338,10 +338,10 @@ mazinger speak --srt translated.srt --original-audio audio.mp3 \
     --fixed-tempo 1.1 \
     -o dubbed.wav
 
-# Dynamic: per-segment speed to match original timing, max 1.3×
+# Per-segment speed matching is the default; cap the speed-up at 1.3×
 mazinger speak --srt translated.srt --original-audio audio.mp3 \
     --clone-profile abubakr \
-    --dynamic-tempo --max-tempo 1.3 \
+    --max-tempo 1.3 \
     -o dubbed.wav
 ```
 

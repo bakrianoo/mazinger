@@ -153,12 +153,17 @@ Controls how dubbed audio segments fit into the original timeline.
 
 | Mode | CLI flags | Behavior |
 |------|-----------|----------|
-| Default (auto) | *(none)* | Speed up segments that overflow; never slow down |
-| Dynamic | `--dynamic-tempo` | Per-segment speed matching (both faster and slower) |
+| Default (auto) | *(none)* | Per-segment matching in both directions — speed up segments that overflow their window, slow down ones that fall well short |
+| Dynamic | `--dynamic-tempo` | Currently identical to the default; both resolve to the same code path |
 | Fixed | `--fixed-tempo 1.1` | Constant multiplier applied to all segments |
 | Off | neither flag, set `tempo_mode="off"` in Python | No speed adjustment — segments placed as-is |
 
-`--max-tempo` (default: `1.3`) caps the speed-up ratio for both auto and dynamic modes.
+`--max-tempo` (default: `1.5`) caps the speed-up ratio. Slow-down is capped
+separately so speech never drags, and is skipped when the correction would be
+negligible.
+
+> `--dynamic-tempo` is currently a no-op: `auto` already does per-segment
+> matching in both directions. The flag is kept for backwards compatibility.
 
 If both `--fixed-tempo` and `--dynamic-tempo` are given, fixed tempo takes precedence.
 

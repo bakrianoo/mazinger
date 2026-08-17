@@ -15,6 +15,51 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
+
+def _as_text(item: object) -> str:
+    """Coerce one LLM-produced list entry to a plain string.
+
+    The prompt asks for lists of strings, but models — smaller local ones in
+    particular — routinely wrap each entry in an object such as
+    ``{"keypoint": "..."}`` or ``{"term": "...", "why": "..."}``.  ``json_repair``
+    fixes malformed *syntax*, not an unexpected *shape*, so without this the
+    whole run dies on ``'dict' object has no attribute 'strip'`` after the
+    expensive stages have already completed.
+    """
+    if isinstance(item, str):
+        return item.strip()
+    if isinstance(item, dict):
+        # Prefer the conventional key names, else the first usable string value.
+        for key in ("keypoint", "keyword", "point", "text", "name", "term", "value"):
+            value = item.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        for value in item.values():
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return ""
+    if isinstance(item, (list, tuple)):
+        return " ".join(filter(None, (_as_text(sub) for sub in item))).strip()
+    if item is None:
+        return ""
+    return str(item).strip()
+
+
+def _dedupe_texts(items: object, limit: int) -> list[str]:
+    """Normalise an LLM list field to unique, non-empty strings."""
+    if not isinstance(items, (list, tuple)):
+        return []
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for item in items:
+        text = _as_text(item)
+        key = text.lower()
+        if key and key not in seen:
+            seen.add(key)
+            deduped.append(text)
+    return deduped[:limit]
+
+
 _DESCRIBE_SYSTEM = """\
 You are a concise, factual video content analyst.
 You will receive screenshots (thumbnails) and subtitle texts from a video.
@@ -159,26 +204,21 @@ def describe_content(
         usage_tracker.record("describe", llm_model, resp)
     description = json_repair.loads(resp.choices[0].message.content)
 
-    # ── Post-process: deduplicate keypoints and keywords ──────────
-    if isinstance(description.get("keypoints"), list):
-        seen = set()
-        deduped = []
-        for kp in description["keypoints"]:
-            key = kp.strip().lower()
-            if key and key not in seen:
-                seen.add(key)
-                deduped.append(kp.strip())
-        description["keypoints"] = deduped[:10]
+    # A model can return a bare list, a string, or nothing usable at all.
+    # Downstream stages only ever read known keys, so degrade to an empty
+    # description rather than failing a run that is otherwise fine.
+    if not isinstance(description, dict):
+        log.warning(
+            "LLM returned a %s rather than a JSON object — continuing without "
+            "a content description.", type(description).__name__,
+        )
+        return {"title": "", "summary": "", "keypoints": [], "keywords": []}
 
-    if isinstance(description.get("keywords"), list):
-        seen = set()
-        deduped = []
-        for kw in description["keywords"]:
-            key = kw.strip().lower()
-            if key and key not in seen:
-                seen.add(key)
-                deduped.append(kw.strip())
-        description["keywords"] = deduped[:20]
+    # ── Post-process: deduplicate keypoints and keywords ──────────
+    if "keypoints" in description:
+        description["keypoints"] = _dedupe_texts(description["keypoints"], 10)
+    if "keywords" in description:
+        description["keywords"] = _dedupe_texts(description["keywords"], 20)
 
     log.info("Description generated: %s", description.get("title", ""))
     return description
