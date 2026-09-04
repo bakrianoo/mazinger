@@ -15,3 +15,4 @@
 7. **[Subtitle Styling](subtitle-styling.md)** — Fonts, colors, positioning, RTL support, Google Fonts
 8. **[Configuration](configuration.md)** — Environment variables, caching, tempo control, LLM usage tracking
 9. **[Project Structure](project-structure.md)** — Output directory layout and file naming conventions
+10. **[Releasing](releasing.md)** — Publishing new versions to PyPI via GitHub Actions Trusted Publishing

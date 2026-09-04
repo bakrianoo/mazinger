@@ -1,0 +1,133 @@
+name: Publish to PyPI
+
+# Releases are published with PyPI Trusted Publishing (OpenID Connect):
+# no API token is stored in this repository.  PyPI is configured to trust
+# this exact workflow file, in this exact repo, running in the `pypi`
+# (or `testpypi`) GitHub Environment, and hands it a short-lived,
+# project-scoped token at upload time.
+#
+# See docs/releasing.md for the one-time PyPI configuration steps.
+
+on:
+  # The real thing: publishing a GitHub Release publishes to PyPI.
+  release:
+    types: [published]
+  # Manual dry runs — defaults to TestPyPI so a mis-click cannot burn a
+  # version number on the real index.
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Index to upload to"
+        type: choice
+        options:
+          - testpypi
+          - pypi
+        default: testpypi
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build sdist + wheel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install build tooling
+        run: python -m pip install --upgrade pip build twine
+
+      - name: Check the release tag matches the version in pyproject.toml
+        if: github.event_name == 'release'
+        run: |
+          python - <<'PY'
+          import os, sys, tomllib
+
+          tag = os.environ["TAG"].removeprefix("refs/tags/").lstrip("v")
+          with open("pyproject.toml", "rb") as fh:
+              declared = tomllib.load(fh)["project"]["version"]
+
+          if tag != declared:
+              sys.exit(
+                  f"::error::Release tag {tag!r} does not match "
+                  f"pyproject.toml version {declared!r}. Bump the version, "
+                  f"commit, retag, and re-release."
+              )
+          print(f"Tag and pyproject.toml agree on version {declared}")
+          PY
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+
+      - name: Build distributions
+        run: python -m build
+
+      - name: Validate distribution metadata
+        run: python -m twine check --strict dist/*
+
+      - name: Smoke-test the built wheel in a clean environment
+        run: |
+          python -m venv /tmp/smoke
+          /tmp/smoke/bin/python -m pip install --upgrade pip
+          /tmp/smoke/bin/python -m pip install dist/*.whl
+          /tmp/smoke/bin/python -c "import mazinger; print('mazinger', mazinger.__version__)"
+          /tmp/smoke/bin/mazinger --help > /dev/null
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  publish-testpypi:
+    name: Publish to TestPyPI
+    if: github.event_name == 'workflow_dispatch' && inputs.target == 'testpypi'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/mazinger
+    permissions:
+      # Required for Trusted Publishing: lets the job mint an OIDC token.
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          # TestPyPI often already holds a build of this version from an
+          # earlier dry run; don't fail the job over it.
+          skip-existing: true
+
+  publish-pypi:
+    name: Publish to PyPI
+    if: github.event_name == 'release' || inputs.target == 'pypi'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/mazinger
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      # No `password:` — the action detects Trusted Publishing from the
+      # OIDC token and also attaches PEP 740 attestations by default.
+      - uses: pypa/gh-action-pypi-publish@release/v1
