@@ -37,8 +37,10 @@ mazinger dub <source> [options]
 | `--voice-theme` | — | Pre-defined voice theme (e.g. `narrator-m`, `warm-f`). See `mazinger profile list` |
 | `--voice-sample` | — | Path to reference voice audio file |
 | `--voice-script` | — | Path to transcript of the voice sample (or inline text) |
-| `--transcribe-method` | `faster-whisper` | `openai`, `faster-whisper`, `whisperx`, `mlx-whisper`, or `deepgram` |
-| `--whisper-model` | varies by method | Whisper/Deepgram model name |
+| `--transcribe-method` | `faster-whisper` | `openai`, `faster-whisper`, `whisperx`, `coherex`, `mlx-whisper`, or `deepgram` |
+| `--whisper-model` | varies by method | Whisper/Deepgram/CohereX model name |
+| `--vad-method` | `pyannote` | Voice-activity detector for CohereX: `pyannote` or `silero` |
+| `--hf-token` | `$HF_TOKEN` | HuggingFace token for gated models (CohereX) |
 | `--mlx-whisper-model` | `mlx-community/whisper-large-v3-turbo` | MLX Whisper model name |
 | `--beam-size` | — | Beam size for decoding (faster-whisper/whisperx) |
 | `--deepgram-api-key` | `$DEEPGRAM_API_KEY` | Deepgram API key (required for `--transcribe-method deepgram`) |
@@ -51,10 +53,11 @@ mazinger dub <source> [options]
 | `--asr-review` | off | Review ASR transcript with LLM to fix typos and punctuation |
 | `--keep-technical-english` | off | Convert technical terms to English in the source transcript (requires `--asr-review`) |
 | `--youtube-subs` | off | Download YouTube subtitles and compare with ASR to pick the best source |
-| `--tts-engine` | `qwen` | `qwen`, `chatterbox`, or `mlx` |
+| `--tts-engine` | `qwen` | `qwen`, `chatterbox`, `mlx`, or `omnivoice` |
 | `--tts-model` | `Qwen/Qwen3-TTS-12Hz-1.7B-Base` | Qwen model ID |
 | `--mlx-tts-model` | `mlx-community/Qwen3-TTS-12Hz-0.6B-Base-bf16` | MLX TTS model name |
 | `--chatterbox-model` | `ResembleAI/chatterbox` | Chatterbox model ID |
+| `--omnivoice-model` | `k2-fsa/OmniVoice` | OmniVoice model ID |
 | `--tts-language` | same as `--target-language` | Language hint for TTS |
 | `--chatterbox-exaggeration` | `0.5` | Emotion intensity (0.0–1.0) |
 | `--chatterbox-cfg` | `0.5` | Pacing control (0.0–1.0) |
@@ -62,9 +65,9 @@ mazinger dub <source> [options]
 | `--output-type` | `audio` | `audio` (WAV only) or `video` (muxed MP4) |
 | `--embed-subtitles` | off | Burn subtitles into output video (implies `--output-type video`) |
 | `--subtitle-source` | `translated` | `translated`, `original`, or path to a custom SRT file |
-| `--dynamic-tempo` | off | Per-segment speed matching |
+| `--dynamic-tempo` | off | No-op — `auto` already matches per segment in both directions |
 | `--fixed-tempo` | — | Constant speed multiplier (e.g., `1.1`) |
-| `--max-tempo` | `1.3` | Maximum speed-up for dynamic/auto tempo |
+| `--max-tempo` | `1.5` | Maximum speed-up ratio applied to overflowing segments |
 | `--no-loudness-match` | off | Skip loudness normalisation against the original audio |
 | `--no-mix-background` | off | Skip mixing background audio from the original |
 | `--background-volume` | `0.15` | Background audio mix level (0.0–1.0) |
@@ -101,16 +104,22 @@ mazinger dub ./lecture.mp4 \
     --embed-subtitles \
     --target-language Spanish
 
+# Dub with OmniVoice (24 languages, zero-shot cloning)
+mazinger dub "https://youtube.com/watch?v=abc123" \
+    --voice-sample speaker.wav \
+    --tts-engine omnivoice \
+    --target-language Hindi
+
 # Dub only a portion of the video
 mazinger dub "https://youtube.com/watch?v=abc123" \
     --clone-profile abubakr --target-language Arabic \
     --start 00:01:30 --end 00:05:00
 
-# Local transcription, dynamic tempo
+# Local transcription, tighter cap on how much a segment may be sped up
 mazinger dub "https://youtube.com/watch?v=abc123" \
     --clone-profile abubakr \
     --transcribe-method faster-whisper \
-    --dynamic-tempo --max-tempo 1.3
+    --max-tempo 1.3
 ```
 
 ---
@@ -186,8 +195,10 @@ If `source` is provided, the video is downloaded first and its audio is transcri
 |------|---------|-------------|
 | `--audio` | — | Path to audio file (overrides source) |
 | `-o`, `--output` | — | Output SRT path |
-| `--method` | `faster-whisper` | `openai`, `faster-whisper`, `whisperx`, `mlx-whisper`, or `deepgram` |
-| `--model` | varies | Model name (`whisper-1` for OpenAI, `large-v3` for local, `nova-3` for Deepgram) |
+| `--method` | `faster-whisper` | `openai`, `faster-whisper`, `whisperx`, `coherex`, `mlx-whisper`, or `deepgram` |
+| `--model` | varies | Model name (`whisper-1` for OpenAI, `large-v3` for local, `nova-3` for Deepgram, `CohereLabs/cohere-transcribe-03-2026` for CohereX) |
+| `--vad-method` | `pyannote` | Voice-activity detector for CohereX: `pyannote` or `silero` |
+| `--hf-token` | `$HF_TOKEN` | HuggingFace token for gated models (CohereX) |
 | `--device` | `auto` | `auto`, `cuda`, `cpu` |
 | `--batch-size` | `16` | Batch size for local transcription |
 | `--compute-type` | `float16` | Weight precision: `float16`, `int8`, `int8_float16` |
@@ -369,18 +380,19 @@ mazinger speak [source] [options]
 | `--voice-script` | — | Path to transcript of voice sample |
 | `-o`, `--output` | — | Output WAV path |
 | `--segments-dir` | — | Directory for individual segment WAVs |
-| `--tts-engine` | `qwen` | `qwen`, `chatterbox`, or `mlx` |
+| `--tts-engine` | `qwen` | `qwen`, `chatterbox`, `mlx`, or `omnivoice` |
 | `--tts-model` | `Qwen/Qwen3-TTS-12Hz-1.7B-Base` | Qwen model ID |
 | `--mlx-tts-model` | `mlx-community/Qwen3-TTS-12Hz-0.6B-Base-bf16` | MLX TTS model name |
 | `--chatterbox-model` | `ResembleAI/chatterbox` | Chatterbox model ID |
+| `--omnivoice-model` | `k2-fsa/OmniVoice` | OmniVoice model ID |
 | `--tts-language` | — | Language hint for TTS |
 | `--chatterbox-exaggeration` | `0.5` | Emotion intensity (0.0–1.0) |
 | `--chatterbox-cfg` | `0.5` | Pacing control (0.0–1.0) |
 | `--device` | `auto` | `auto`, `cuda`, `cpu` |
 | `--dtype` | `bfloat16` | Weight dtype for Qwen: `bfloat16`, `float16`, `float32` |
-| `--dynamic-tempo` | off | Per-segment tempo matching |
+| `--dynamic-tempo` | off | No-op — `auto` already matches per segment in both directions |
 | `--fixed-tempo` | — | Constant speed multiplier |
-| `--max-tempo` | `1.3` | Maximum speed-up ratio |
+| `--max-tempo` | `1.5` | Maximum speed-up ratio |
 | `--force-reset` | off | Re-synthesize all segments from scratch |
 
 **Examples:**

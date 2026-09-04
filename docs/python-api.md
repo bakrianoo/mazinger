@@ -36,19 +36,20 @@ proj = dubber.dub(
     voice_theme=None,                 # str | None — pre-defined theme (alternative to sample+script)
     slug=None,                        # str — project directory name (auto-generated if omitted)
     device="cuda",                    # str — "cuda", "cpu", or "auto"
-    transcribe_method="faster-whisper",  # str — "openai", "faster-whisper", "whisperx", "mlx-whisper"
+    transcribe_method="faster-whisper",  # str — "openai", "faster-whisper", "whisperx", "coherex", "mlx-whisper"
     whisper_model=None,               # str — model name override
     mlx_whisper_model="mlx-community/whisper-large-v3-turbo",  # str — MLX Whisper model
     tts_model_name="Qwen/Qwen3-TTS-12Hz-1.7B-Base",
     tts_dtype="bfloat16",             # str — "bfloat16", "float16", "float32"
     tts_language=None,                # str — TTS language hint (defaults to target_language)
-    tts_engine="qwen",               # str — "qwen", "chatterbox", or "mlx"
+    tts_engine="qwen",               # str — "qwen", "chatterbox", "mlx", or "omnivoice"
     mlx_model="mlx-community/Qwen3-TTS-12Hz-0.6B-Base-bf16",  # str — MLX TTS model
     source_language="auto",           # str — source language or "auto"
     target_language="English",        # str — one of 33 supported languages
     chatterbox_model="ResembleAI/chatterbox",
     chatterbox_exaggeration=0.5,      # float — 0.0–1.0, emotion intensity
     chatterbox_cfg=0.5,               # float — 0.0–1.0, pacing control
+    omnivoice_model="k2-fsa/OmniVoice",  # str — OmniVoice model ID
     cookies_from_browser=None,        # str — browser name for yt-dlp cookie extraction
     cookies=None,                     # str — path to cookies.txt
     quality=None,                     # str — "low", "medium", "high", or numeric
@@ -230,6 +231,10 @@ transcribe("audio.mp3", "subtitles.srt")
 transcribe("audio.mp3", "subtitles.srt", method="faster-whisper", device="cuda")
 transcribe("audio.mp3", "subtitles.srt", method="whisperx", device="cuda")
 
+# CohereX — Cohere Transcribe + wav2vec2 alignment (14 languages).
+# The source language is required; Cohere Transcribe cannot detect it.
+transcribe("audio.mp3", "subtitles.srt", method="coherex", language="ar")
+
 # MLX (Apple Silicon)
 transcribe("audio.mp3", "subtitles.srt", method="mlx-whisper")
 ```
@@ -376,6 +381,19 @@ wrapper = tts.create_voice_prompt(
     chatterbox_cfg=0.5,
 )
 segments = tts.synthesize_segments(model, wrapper, entries, "./segments", language="Spanish")
+```
+
+For OmniVoice (24 languages):
+
+```python
+model = tts.load_model(engine="omnivoice")
+wrapper = tts.create_voice_prompt(
+    model,
+    ref_audio="speaker.wav",
+    ref_text="Transcript of the reference audio.",
+    engine="omnivoice",
+)
+segments = tts.synthesize_segments(model, wrapper, entries, "./segments", language="Hindi")
 ```
 
 To re-synthesize all segments instead of resuming:

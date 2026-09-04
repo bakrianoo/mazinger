@@ -42,11 +42,14 @@ Converts the audio track into SRT subtitles. Three backends are available:
 | OpenAI Whisper API | Cloud | API key |
 | faster-whisper | Local, CTranslate2 | `transcribe-faster` extra, CUDA GPU |
 | WhisperX | Local, PyTorch + wav2vec2 | `transcribe-whisperx` extra, CUDA GPU |
+| CohereX (Studio default) | Local, Cohere Transcribe + wav2vec2 | in `mazinger[all]`, CUDA GPU, HuggingFace sign-in |
 | MLX Whisper | Local, Apple MLX | `transcribe-mlx` extra, Apple Silicon (M1/M2/M3/M4/M5) |
 
 **Audio preprocessing:** Before transcription, the audio is automatically converted to 16 kHz mono WAV — the native format Whisper was trained on. This avoids lossy-codec artefacts and redundant internal resampling.
 
-**Metadata-driven prompting:** When video metadata is available (e.g. YouTube title, description, tags), the pipeline automatically builds a Whisper `initial_prompt` from it. This anchors the decoder on expected vocabulary and reduces misheard domain-specific terms.
+**Metadata-driven prompting:** When video metadata is available (e.g. YouTube title, description, tags), the pipeline automatically builds a Whisper `initial_prompt` from it. This anchors the decoder on expected vocabulary and reduces misheard domain-specific terms. CohereX does not support prompting and skips this step.
+
+**Source language:** When `--source-language` is set, it is passed to the transcription backend instead of relying on auto-detection. This matters most for CohereX, which performs no language detection of its own — see [Configuration](configuration.md#coherex).
 
 The raw transcription is saved as `source.raw.srt`. A cleaned-up version with basic re-segmentation (merging short fragments, splitting long entries) is saved as `source.srt`.
 
@@ -129,7 +132,9 @@ Generates a WAV file for each subtitle entry using voice-cloned TTS.
 
 **Chatterbox** requires only a voice sample. It supports 23 languages and has emotion control parameters (`exaggeration` and `cfg`).
 
-**Voice themes** offer a third option: instead of providing a voice sample, pass `--voice-theme` to select from 16 pre-defined themes (e.g. `narrator-m`, `warm-f`, `kid-m`). The theme generates a reference voice via Qwen3-TTS VoiceDesign. When used with `dub` or `speak`, the generated profile is saved to the project's `voice_profile/` directory and reused on subsequent runs.
+**OmniVoice** supports 24 languages with zero-shot voice cloning. It requires a voice sample and optionally a transcript. Built on a diffusion language model architecture, it delivers fast inference (RTF ~0.025) and state-of-the-art voice cloning quality. Supported languages: Arabic, Cantonese, Chinese, Czech, Dutch, English, Finnish, French, German, Greek, Hindi, Indonesian, Italian, Japanese, Korean, Polish, Portuguese, Romanian, Russian, Spanish, Thai, Turkish, Ukrainian, and Vietnamese.
+
+**Voice themes** offer a fourth option: instead of providing a voice sample, pass `--voice-theme` to select from 16 pre-defined themes (e.g. `narrator-m`, `warm-f`, `kid-m`). The theme generates a reference voice via Qwen3-TTS VoiceDesign. When used with `dub` or `speak`, the generated profile is saved to the project's `voice_profile/` directory and reused on subsequent runs.
 
 Each segment is saved individually (`seg_0001.wav`, `seg_0002.wav`, ...) so interrupted runs can resume without re-synthesizing completed segments.
 
@@ -144,10 +149,14 @@ Tempo modes:
 
 | Mode | Behavior |
 |------|----------|
-| `auto` | Speed up segments that overflow (never slow down) |
-| `dynamic` | Per-segment speed matching, both faster and slower |
+| `auto` (default) | Per-segment matching in both directions: speed up segments that overflow their window (capped at `--max-tempo`), and slow down segments that fall well short of it |
+| `dynamic` | Currently identical to `auto` — both resolve to the same code path |
 | `fixed` | Apply a constant multiplier to all segments (e.g., 1.1×) |
 | `off` | No tempo change — place segments as-is |
+
+Slow-down never targets a 100% fill; it stretches toward a partial fill of the
+window so speech does not become sluggish, and is skipped entirely when the
+correction would be negligible.
 
 After placement, two post-processing steps run by default:
 
@@ -201,4 +210,6 @@ Broader multilingual support — see Chatterbox documentation for the full list.
 
 ### Transcription
 
-All backends support automatic language detection. You can also force a specific language code (e.g., `--language en`) for better accuracy.
+All Whisper-family backends support automatic language detection. You can also force a specific language code (e.g., `--language en`) for better accuracy.
+
+CohereX covers 14 languages — Arabic, Chinese, Dutch, English, French, German, Greek, Italian, Japanese, Korean, Polish, Portuguese, Spanish, Vietnamese — and cannot detect the language itself, so an explicit source language is strongly recommended.

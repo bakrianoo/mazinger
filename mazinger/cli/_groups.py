@@ -8,7 +8,7 @@ import sys
 
 DEFAULT_BASE_DIR = "./mazinger_output"
 
-from mazinger.tts import DEFAULT_MLX_MODEL
+from mazinger.tts import DEFAULT_MLX_MODEL, DEFAULT_OMNIVOICE_MODEL
 from mazinger.transcribe import DEFAULT_MLX_WHISPER_MODEL
 
 log = __import__("logging").getLogger(__name__)
@@ -186,11 +186,12 @@ def add_voice(p: argparse.ArgumentParser) -> None:
 def add_tts_engine(p: argparse.ArgumentParser) -> None:
     p.add_argument("--tts-model", default="Qwen/Qwen3-TTS-12Hz-1.7B-Base", help="Qwen TTS model name.")
     p.add_argument("--chatterbox-model", default="ResembleAI/chatterbox", help="Chatterbox TTS model name.")
+    p.add_argument("--omnivoice-model", default=DEFAULT_OMNIVOICE_MODEL, help="OmniVoice TTS model name.")
     p.add_argument("--tts-language", default=None, type=_language_type,
                    help="Target TTS language (defaults to --target-language).")
     p.add_argument(
-        "--tts-engine", default="qwen", choices=["qwen", "chatterbox", "mlx"],
-        help="TTS engine: 'qwen' (Qwen3-TTS), 'chatterbox' (ResembleAI Chatterbox), or 'mlx' (Apple Silicon).",
+        "--tts-engine", default="qwen", choices=["qwen", "chatterbox", "mlx", "omnivoice"],
+        help="TTS engine: 'qwen' (Qwen3-TTS), 'chatterbox' (ResembleAI Chatterbox), 'mlx' (Apple Silicon), or 'omnivoice' (OmniVoice 24 languages).",
     )
     p.add_argument("--mlx-tts-model", default=DEFAULT_MLX_MODEL,
                    help="MLX Qwen3-TTS model name (default: mlx-community/Qwen3-TTS-12Hz-0.6B-Base-bf16).")
@@ -227,19 +228,30 @@ def add_segment_mode(p: argparse.ArgumentParser) -> None:
 def add_transcription(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--transcribe-method", default="faster-whisper",
-        choices=["openai", "faster-whisper", "whisperx", "mlx-whisper", "deepgram"],
+        choices=["openai", "faster-whisper", "whisperx", "coherex", "mlx-whisper", "deepgram"],
         help="Transcription backend: 'faster-whisper' (default), 'openai', 'whisperx', "
-             "'mlx-whisper' (Apple Silicon), or 'deepgram' (cloud).",
+             "'coherex' (Cohere Transcribe, 14 languages), 'mlx-whisper' (Apple Silicon), "
+             "or 'deepgram' (cloud).",
     )
-    p.add_argument("--whisper-model", default=None, help="Whisper/Deepgram model name.")
+    p.add_argument("--whisper-model", default=None, help="Whisper/Deepgram/CohereX model name.")
+    p.add_argument(
+        "--vad-method", default="pyannote", choices=["pyannote", "silero"],
+        help="Voice-activity detector for CohereX: 'pyannote' (default, weights "
+             "bundled with the package) or 'silero'.",
+    )
+    p.add_argument(
+        "--hf-token", default=None,
+        help="HuggingFace token for gated models (CohereX). Defaults to $HF_TOKEN.",
+    )
     p.add_argument("--mlx-whisper-model", default=DEFAULT_MLX_WHISPER_MODEL,
                    help=f"MLX Whisper model name (default: {DEFAULT_MLX_WHISPER_MODEL}).")
     p.add_argument(
         "--beam-size",
         type=int,
         default=None,
-        help="Beam size for decoding when supported by the selected backend (for example, faster-whisper). "
-             "Leave unset for mlx-whisper.",
+        help="Beam size for decoding when supported by the selected backend "
+             "(faster-whisper, whisperx); defaults to 5 there. Must be left "
+             "unset for mlx-whisper, which decodes by sampling.",
     )
     add_deepgram(p)
 

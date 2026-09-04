@@ -7,7 +7,7 @@ import os
 from typing import Any
 
 from mazinger.paths import ProjectPaths
-from mazinger.tts import DEFAULT_MLX_MODEL
+from mazinger.tts import DEFAULT_MLX_MODEL, DEFAULT_OMNIVOICE_MODEL
 from mazinger.utils import (
     save_json, load_json, get_audio_duration, LLMUsageTracker,
     is_valid_media_file, is_valid_srt_file, is_valid_json_file,
@@ -81,11 +81,14 @@ class MazingerDubber:
         tts_engine: str = "qwen",
         mlx_model: str = DEFAULT_MLX_MODEL,
         deepgram_api_key: str | None = None,
+        vad_method: str = "pyannote",
+        hf_token: str | None = None,
         source_language: str = "auto",
         target_language: str = "English",
         chatterbox_model: str = "ResembleAI/chatterbox",
         chatterbox_exaggeration: float = 0.5,
         chatterbox_cfg: float = 0.5,
+        omnivoice_model: str = DEFAULT_OMNIVOICE_MODEL,
         loudness_match: bool = True,
         mix_background: bool = True,
         background_volume: float = 0.15,
@@ -109,9 +112,11 @@ class MazingerDubber:
         asr_review: bool = False,
         keep_technical_english: bool = False,
         use_youtube_subs: bool = False,
+        translation_model: str | None = None,
         output_type: str = "audio",
         subtitle_style=None,
         subtitle_source: str = "translated",
+        user_instructions: str = "",
     ) -> ProjectPaths:
         """Run the full pipeline: download/ingest, transcribe, translate, and dub.
 
@@ -131,10 +136,19 @@ class MazingerDubber:
             device:         Accelerator device (``cuda`` or ``cpu``).
             transcribe_method: Transcription backend: ``faster-whisper`` (default,
                             local GPU), ``openai`` (cloud API), ``whisperx``
-                            (requires [transcribe-whisperx] extra), or
-                            ``deepgram`` (cloud, requires DEEPGRAM_API_KEY).
+                            (requires [transcribe-whisperx] extra), ``coherex``
+                            (Cohere Transcribe, requires [transcribe-coherex]
+                            extra and a HuggingFace token), or ``deepgram``
+                            (cloud, requires DEEPGRAM_API_KEY).
             deepgram_api_key: Deepgram API key (Deepgram method only). Falls
                             back to ``DEEPGRAM_API_KEY`` environment variable.
+            vad_method:     Voice-activity detector for CohereX: ``pyannote``
+                            (default) or ``silero`` (no HuggingFace gate).
+            hf_token:       HuggingFace token for gated models (CohereX). Falls
+                            back to the ``HF_TOKEN`` environment variable.
+            source_language: Source language name, or ``auto`` to detect. When
+                            set, it is now also passed to the transcription
+                            backend rather than used for translation only.
             whisper_model:  Whisper model name. Defaults to ``whisper-1`` for OpenAI,
                             ``large-v3`` for faster-whisper/WhisperX.
             tts_model_name: HuggingFace model identifier for TTS.
@@ -211,7 +225,17 @@ class MazingerDubber:
             log.debug("YouTube subtitle download disabled (use_youtube_subs=False)")
 
         # -- Resolve voice (theme / profile / explicit sample+script) -----
-        if voice_theme and not (voice_sample and voice_script):
+        _omnivoice_instruct: str | None = None
+        if voice_theme and tts_engine == "omnivoice" and not (voice_sample and voice_script):
+            # OmniVoice has its own voice-design mode via ``instruct`` —
+            # no need to generate a Qwen reference clip.
+            from mazinger.profiles import get_theme_instruct
+            _omnivoice_instruct = get_theme_instruct(voice_theme, tts_language)
+            log.info(
+                "OmniVoice voice-design theme %s / %s -> instruct=%r",
+                voice_theme, tts_language, _omnivoice_instruct,
+            )
+        elif voice_theme and not (voice_sample and voice_script):
             from mazinger.profiles import generate_profile
             profile_dir = proj.voice_profile_dir
             profile_wav = os.path.join(profile_dir, "voice.wav")
@@ -225,7 +249,7 @@ class MazingerDubber:
                     device=device_for_tts, dtype=tts_dtype,
                 )
 
-        auto_clone = not voice_sample and not voice_script
+        auto_clone = not voice_sample and not voice_script and not _omnivoice_instruct
 
         if force_reset:
             skip_existing = False
@@ -236,8 +260,8 @@ class MazingerDubber:
 
         # -- Read voice script (deferred when auto-cloning) ---------------
         ref_text = None
-        if not auto_clone:
-            if os.path.isfile(voice_script):
+        if not auto_clone and not _omnivoice_instruct:
+            if voice_script and os.path.isfile(voice_script):
                 with open(voice_script, encoding="utf-8") as fh:
                     ref_text = fh.read().strip()
             else:
@@ -284,18 +308,40 @@ class MazingerDubber:
             if _initial_prompt:
                 log.info("Whisper initial prompt (from metadata): %.120s…", _initial_prompt)
 
+            # Honour an explicit source language at the ASR stage.  ``auto``
+            # leaves detection to the backend — which CohereX cannot do, so it
+            # falls back to its own probe-based detector.
+            _asr_language = None
+            if source_language and source_language != "auto":
+                _asr_language = translate.lang_code_from_name(source_language)
+                # lang_code_from_name() falls back to "en" for unknown names.
+                # Forcing the wrong language on an ASR model yields fluent
+                # nonsense rather than an error, so detect instead of guessing.
+                if translate.lang_name_from_code(_asr_language) != source_language:
+                    log.warning(
+                        "Unrecognised source language %r — leaving detection to "
+                        "the transcription backend.", source_language,
+                    )
+                    _asr_language = None
+                else:
+                    log.info("Transcribing with forced source language: %s (%s)",
+                             source_language, _asr_language)
+
             transcribe.transcribe(
                 proj.audio, proj.source_srt,
                 method=transcribe_method,
                 model=whisper_model,
                 mlx_whisper_model=mlx_whisper_model,
                 device=device,
+                language=_asr_language,
                 beam_size=None if transcribe_method == "mlx-whisper" else beam_size,
                 openai_api_key=self._api_key,
                 openai_base_url=self._base_url,
                 deepgram_api_key=deepgram_api_key,
                 skip_resegment=not use_resegmented,
                 initial_prompt=_initial_prompt,
+                vad_method=vad_method,
+                hf_token=hf_token,
             )
 
         transcribe.clear_cache()
@@ -364,6 +410,7 @@ class MazingerDubber:
                 llm_model=self.llm_model,
                 video_meta=video_meta,
                 usage_tracker=usage_tracker,
+                user_instructions=user_instructions,
             )
             save_json(description, proj.description)
 
@@ -387,7 +434,10 @@ class MazingerDubber:
                     fh.write(source_srt_text)
 
         # -- Auto-clone voice from source audio ---------------------------
-        if auto_clone:
+        if auto_clone and tts_engine != "omnivoice":
+            # For Qwen/Chatterbox/MLX: extract a voice sample from the source
+            # audio to use as a cloning reference.
+            # OmniVoice has its own auto-voice mode and does not need this.
             from mazinger.profiles import create_auto_clone_profile
             profile_dir = proj.voice_profile_dir
             profile_wav = os.path.join(profile_dir, "voice.wav")
@@ -403,12 +453,41 @@ class MazingerDubber:
                 voice_sample = create_auto_clone_profile(
                     proj.audio, clone_srt, profile_dir,
                 )
+        elif auto_clone and tts_engine == "omnivoice":
+            log.info("OmniVoice auto-voice mode — skipping voice profile extraction")
 
         # 5. Translate ---------------------------------------------------
         if skip_existing and is_valid_srt_file(proj.translated_raw_srt):
             log.info("Skipping translation (file exists)")
             with open(proj.translated_raw_srt, encoding="utf-8") as fh:
                 translated_srt = fh.read()
+        elif translation_model:
+            # Dedicated per-segment translation model (e.g. translategemma).
+            # Read the language detected by Whisper from the sidecar so the
+            # template prompt carries an accurate source language.
+            detected_src = source_language
+            if (not detected_src or detected_src == "auto") and os.path.exists(proj.source_lang):
+                try:
+                    with open(proj.source_lang, encoding="utf-8") as fh:
+                        detected_code = fh.read().strip()
+                    detected_name = translate.lang_name_from_code(detected_code)
+                    if detected_name:
+                        detected_src = detected_name
+                        log.info(
+                            "Using Whisper-detected source language: %s (%s)",
+                            detected_name, detected_code,
+                        )
+                except OSError:
+                    pass
+            translated_srt = translate.translate_srt_simple(
+                source_srt_text, client,
+                llm_model=translation_model,
+                source_language=detected_src,
+                target_language=target_language,
+                usage_tracker=usage_tracker,
+            )
+            with open(proj.translated_raw_srt, "w", encoding="utf-8") as fh:
+                fh.write(translated_srt)
         else:
             translated_srt = translate.translate_srt(
                 source_srt_text, description, thumb_paths, client,
@@ -418,6 +497,7 @@ class MazingerDubber:
                 translate_technical_terms=translate_technical_terms,
                 video_meta=video_meta,
                 usage_tracker=usage_tracker,
+                user_instructions=user_instructions,
                 **(dict(words_per_second=words_per_second) if words_per_second is not None else {}),
                 **(dict(duration_budget=duration_budget) if duration_budget is not None else {}),
             )
@@ -452,6 +532,21 @@ class MazingerDubber:
             with open(proj.final_srt, "w", encoding="utf-8") as fh:
                 fh.write(resegmented)
 
+        # 6b. Safety net — absorb tiny tail segments into a neighbour.
+        # Runs every time (even when the SRT was reused from cache) so
+        # files produced before this fix get cleaned up automatically
+        # and TTS never receives a sub-second standalone segment.
+        try:
+            with open(proj.final_srt, encoding="utf-8") as fh:
+                _final_text = fh.read()
+            _cleaned = resegment.absorb_short_segments(_final_text)
+            if _cleaned != _final_text:
+                with open(proj.final_srt, "w", encoding="utf-8") as fh:
+                    fh.write(_cleaned)
+                log.info("Final SRT updated: short-segment merge applied")
+        except Exception as exc:  # noqa: BLE001 — never block the pipeline
+            log.warning("Short-segment merge skipped: %s", exc)
+
         if hasattr(client, 'unload_model'):
             client.unload_model(self.llm_model)
 
@@ -466,6 +561,7 @@ class MazingerDubber:
             dtype=tts_dtype, engine=tts_engine,
             chatterbox_model=chatterbox_model,
             mlx_model=mlx_model,
+            omnivoice_model=omnivoice_model,
         )
         voice_prompt = tts.create_voice_prompt(
             tts_model, voice_sample, ref_text,
@@ -473,6 +569,8 @@ class MazingerDubber:
             chatterbox_exaggeration=chatterbox_exaggeration,
             chatterbox_cfg=chatterbox_cfg,
             mlx_model=mlx_model,
+            omnivoice_model=omnivoice_model,
+            voice_design_instruct=_omnivoice_instruct,
         )
         segment_info = tts.synthesize_segments(
             tts_model, voice_prompt, srt_entries, proj.tts_segments_dir,

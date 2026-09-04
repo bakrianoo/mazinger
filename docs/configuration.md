@@ -84,6 +84,7 @@ TTS synthesis has finer granularity — individual segment WAVs (`seg_0001.wav`,
 | OpenAI Whisper API | `openai` | `whisper-1` | No | Pay per audio minute |
 | faster-whisper | `faster-whisper` | `large-v3` | Yes (or CPU) | Free |
 | WhisperX | `whisperx` | `large-v3` | Yes | Free |
+| CohereX | `coherex` | `CohereLabs/cohere-transcribe-03-2026` | Yes | Free |
 | MLX Whisper | `mlx-whisper` | `mlx-community/whisper-large-v3-turbo` | Apple Silicon | Free |
 
 **Choosing a method:**
@@ -92,6 +93,40 @@ TTS synthesis has finer granularity — individual segment WAVs (`seg_0001.wav`,
 - Using Chatterbox TTS → pick `openai` or `faster-whisper` (WhisperX conflicts)
 - Need offline processing → pick `faster-whisper` (default)
 - Need word-level alignment → pick `whisperx` with Qwen TTS (requires `transcribe-whisperx` extra)
+- Transcribing Arabic → pick `coherex`, which auto-selects the dedicated Cohere Arabic model
+- Transcribing one of CohereX's 14 languages → pick `coherex` for word-level alignment without the Chatterbox conflict (in `mazinger[all]`; the Studio already defaults to it)
+
+### CohereX
+
+CohereX pairs Cohere Transcribe with wav2vec2 forced alignment, following the
+same design as WhisperX. It covers 14 languages: `en`, `fr`, `de`, `es`, `it`,
+`pt`, `nl`, `pl`, `el`, `ar`, `ja`, `zh`, `vi`, `ko`.
+
+Two behaviours differ from the Whisper backends:
+
+- **The source language is required.** Cohere Transcribe performs no language
+  detection, and transcribes confidently in whatever language it is given — a
+  wrong language yields fluent nonsense rather than an error. Always pass
+  `--source-language`. When you omit it, Mazinger falls back to CohereX's
+  probe-based detector, which costs one short generation per candidate
+  language.
+- **`--initial-prompt` is ignored.** The Cohere processor accepts only a
+  language and a punctuation flag, so the metadata-derived prompt that
+  Mazinger builds for Whisper does not apply. A warning is logged.
+
+The Cohere models are gated on HuggingFace: sign in and accept the terms on
+each model page once. CohereX's pyannote VAD weights ship inside the package,
+so the VAD needs no authorisation — `--vad-method silero` is available as an
+alternative detector, not as a way around a gate.
+
+Authenticate in whichever way suits you:
+
+- **Mazinger Studio** — the *Hugging Face* panel has a **Sign in with Hugging
+  Face** button that runs the Hub's device-code flow in the browser.
+- **CLI** — set `HF_TOKEN`, or pass `--hf-token`.
+
+Arabic sources automatically use `CohereLabs/cohere-transcribe-arabic-07-2026`
+instead of the multilingual base model. Override with `--whisper-model`.
 
 ## TTS Engines
 
@@ -118,12 +153,17 @@ Controls how dubbed audio segments fit into the original timeline.
 
 | Mode | CLI flags | Behavior |
 |------|-----------|----------|
-| Default (auto) | *(none)* | Speed up segments that overflow; never slow down |
-| Dynamic | `--dynamic-tempo` | Per-segment speed matching (both faster and slower) |
+| Default (auto) | *(none)* | Per-segment matching in both directions — speed up segments that overflow their window, slow down ones that fall well short |
+| Dynamic | `--dynamic-tempo` | Currently identical to the default; both resolve to the same code path |
 | Fixed | `--fixed-tempo 1.1` | Constant multiplier applied to all segments |
 | Off | neither flag, set `tempo_mode="off"` in Python | No speed adjustment — segments placed as-is |
 
-`--max-tempo` (default: `1.3`) caps the speed-up ratio for both auto and dynamic modes.
+`--max-tempo` (default: `1.5`) caps the speed-up ratio. Slow-down is capped
+separately so speech never drags, and is skipped when the correction would be
+negligible.
+
+> `--dynamic-tempo` is currently a no-op: `auto` already does per-segment
+> matching in both directions. The flag is kept for backwards compatibility.
 
 If both `--fixed-tempo` and `--dynamic-tempo` are given, fixed tempo takes precedence.
 

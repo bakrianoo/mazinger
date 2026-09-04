@@ -2,6 +2,11 @@
 __pycache__/
 *.py[cod]
 *$py.class
+.gradio
+mazinger_output
+tests/*.mp3
+tests/*.mp4
+
 
 # Distribution / packaging
 build/

@@ -199,6 +199,7 @@ def _build_system_prompt(
     tone: str = "",
     speakers: list[dict] | None = None,
     languages: list[str] | None = None,
+    user_instructions: str = "",
 ) -> str:
     kw_examples = ", ".join(f'"{ k}"' for k in keywords[:10])
     kp_summary = "; ".join(keypoints[:8])
@@ -234,7 +235,7 @@ def _build_system_prompt(
         )
         speaker_ctx = f" Speakers: {roles}."
 
-    return f"""\
+    _prompt = f"""\
 You are a professional {target_language} dubbing script writer.{source_ctx}{genre_ctx}{dialect_ctx}{tone_ctx}{speaker_ctx} You are given subtitle texts as a JSON \
 array (with index, text, and a target word count), video screenshots, and a \
 keyword/keypoint list. Produce natural, well-phrased {target_language} dubbing \
@@ -303,7 +304,13 @@ EXAMPLE OUTPUT (with a merge):
 
 You may receive CONTEXT BEFORE and CONTEXT AFTER sections. They are for \
 reference only -- translate and return ONLY the MAIN BLOCK entries."""
-
+    if user_instructions and user_instructions.strip():
+        _prompt += (
+            "\n\nCONTENT & TRANSLATION GUIDELINES FROM THE USER:\n"
+            + user_instructions.strip()
+            + "\nApply these guidelines throughout your translation."
+        )
+    return _prompt
 
 
 def _technical_terms_instruction(
@@ -571,6 +578,7 @@ def translate_srt(
     translate_technical_terms: bool = False,
     video_meta: dict | None = None,
     usage_tracker: LLMUsageTracker | None = None,
+    user_instructions: str = "",
 ) -> str:
     """Translate an SRT file to the target language using batched LLM calls with visual context.
 
@@ -622,6 +630,7 @@ def translate_srt(
         tone=description.get("tone", ""),
         speakers=description.get("speakers"),
         languages=description.get("languages"),
+        user_instructions=user_instructions,
     )
 
     log.info("Translating %d SRT blocks in batches of %d", len(all_blocks), blocks_per_batch)
@@ -715,3 +724,315 @@ def translate_srt(
         log.info("Translation complete: %d entries", translated_count)
 
     return result
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Simple per-segment translation (template-based, e.g. for `translategemma`)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Canonical language name → ISO 639-1 code.  Used by template-based
+# translators that expect explicit source/target codes.
+_LANG_TO_ISO_CODE: dict[str, str] = {
+    "Arabic": "ar", "Bengali": "bn",
+    "Chinese (Simplified)": "zh", "Chinese (Traditional)": "zh",
+    "Czech": "cs", "Danish": "da", "Dutch": "nl",
+    "English": "en", "Finnish": "fi", "French": "fr",
+    "German": "de", "Greek": "el", "Hebrew": "he",
+    "Hindi": "hi", "Hungarian": "hu", "Indonesian": "id",
+    "Italian": "it", "Japanese": "ja", "Korean": "ko",
+    "Malay": "ms", "Norwegian": "no", "Persian": "fa",
+    "Polish": "pl", "Portuguese": "pt", "Romanian": "ro",
+    "Russian": "ru", "Spanish": "es", "Swedish": "sv",
+    "Thai": "th", "Turkish": "tr", "Ukrainian": "uk",
+    "Urdu": "ur", "Vietnamese": "vi",
+}
+
+# Reverse: ISO code → canonical language name.  Whisper emits codes
+# (``en``, ``ar`` …) so we need this to translate the detected language
+# into a name the template can render.
+_ISO_CODE_TO_LANG: dict[str, str] = {}
+for _name, _code in _LANG_TO_ISO_CODE.items():
+    _ISO_CODE_TO_LANG.setdefault(_code, _name)
+
+
+def lang_name_from_code(code: str | None) -> str | None:
+    """Return the canonical language name for an ISO 639-1 *code*.
+
+    Returns ``None`` when *code* is empty or unknown.
+    """
+    if not code:
+        return None
+    return _ISO_CODE_TO_LANG.get(code.lower().split("-")[0])
+
+
+def lang_code_from_name(name: str) -> str:
+    """Return the ISO 639-1 code for a canonical language *name*.
+
+    Falls back to ``"en"`` if *name* is not in the map.
+    """
+    return _LANG_TO_ISO_CODE.get(name, "en")
+
+
+# User-facing translation template — kept in a constant so the same
+# wording the model was fine-tuned on is used at runtime.
+SIMPLE_TRANSLATION_TEMPLATE = (
+    "You are a professional {SOURCE_LANG} ({SOURCE_CODE}) to "
+    "{TARGET_LANG} ({TARGET_CODE}) translator. Your goal is to accurately "
+    "convey the meaning and nuances of the original {SOURCE_LANG} text "
+    "while adhering to {TARGET_LANG} grammar, vocabulary, and cultural "
+    "sensitivities.\n"
+    "Produce only the {TARGET_LANG} translation, without any additional "
+    "explanations or commentary. Please translate the following "
+    "{SOURCE_LANG} text into {TARGET_LANG}:\n\n\n"
+    "{TEXT}"
+)
+
+
+def _build_simple_prompt(
+    text: str, source_language: str, target_language: str,
+) -> str:
+    return SIMPLE_TRANSLATION_TEMPLATE.format(
+        SOURCE_LANG=source_language,
+        SOURCE_CODE=lang_code_from_name(source_language),
+        TARGET_LANG=target_language,
+        TARGET_CODE=lang_code_from_name(target_language),
+        TEXT=text,
+    )
+
+
+def _strip_simple_translation(reply: str) -> str:
+    """Clean up a raw translation reply.
+
+    Some chat-tuned translation models echo the prompt back, wrap the
+    answer in code fences, or prefix it with ``"Translation:"``. Strip
+    those common artifacts before returning.
+    """
+    text = reply.strip()
+    text = _CODE_FENCE_RE.sub("", text)
+    # Drop a leading "Translation:" / "Output:" label (case-insensitive).
+    text = re.sub(r"^\s*(translation|output|answer)\s*[:\-]\s*", "", text, flags=re.I)
+    # Some models repeat the source language name in the lead-in.
+    text = re.sub(
+        r"^\s*Here(?:'s| is) the [^\n:]+translation[^:]*:\s*", "",
+        text, flags=re.I,
+    )
+    return text.strip()
+
+
+# Maximum source-block duration before pre-splitting kicks in for the
+# simple-template translator.  Without splitting, a 30 s source line can
+# expand to a 60–90 s translation that the assembler would have to trim
+# (the simple path has no per-segment word budgeting).  Splitting at
+# sentence boundaries first keeps each block within a slot the
+# assembler can realistically fit.
+_SIMPLE_MAX_BLOCK_SEC = 12.0
+_SIMPLE_MIN_SUBBLOCK_SEC = 2.5
+
+# Sentence-terminator characters that we will split on, in priority
+# order.  Includes Latin, Arabic (؟ ،), CJK (。！？), Devanagari (।)
+# punctuation so the splitter behaves on multilingual input.
+_SENTENCE_BOUNDARY_RE = re.compile(
+    r"(?<=[\.!\?。！？؟।])\s+(?=\S)"
+)
+_CLAUSE_BOUNDARY_RE = re.compile(
+    r"(?<=[,;:،؛])\s+(?=\S)"
+)
+
+
+def _split_text_for_duration(text: str, max_pieces: int) -> list[str]:
+    """Split *text* into at most *max_pieces* readable chunks.
+
+    Tries sentence boundaries first, then clause boundaries, then word
+    boundaries — preferring natural breaks over fixed character counts
+    so each chunk is independently translatable.
+    """
+    if max_pieces <= 1 or not text.strip():
+        return [text]
+
+    parts = _SENTENCE_BOUNDARY_RE.split(text)
+    if len(parts) >= 2:
+        return _balance_pieces(parts, max_pieces)
+
+    parts = _CLAUSE_BOUNDARY_RE.split(text)
+    if len(parts) >= 2:
+        return _balance_pieces(parts, max_pieces)
+
+    # Word-level fallback: cut into roughly equal piles of words.
+    words = text.split()
+    if len(words) < max_pieces:
+        return [text]
+    chunk = max(1, len(words) // max_pieces)
+    return [
+        " ".join(words[i:i + chunk]) for i in range(0, len(words), chunk)
+    ]
+
+
+def _balance_pieces(parts: list[str], max_pieces: int) -> list[str]:
+    """Greedily merge adjacent *parts* until at most *max_pieces* remain.
+
+    Targets evenly-sized pieces by repeatedly merging the smallest
+    adjacent pair — this avoids the degenerate "one giant + many tiny"
+    output that naive truncation produces.
+    """
+    pieces = [p.strip() for p in parts if p.strip()]
+    while len(pieces) > max_pieces:
+        # Find the smallest adjacent pair (by combined length).
+        sizes = [len(pieces[i]) + len(pieces[i + 1]) for i in range(len(pieces) - 1)]
+        i = int(min(range(len(sizes)), key=lambda k: sizes[k]))
+        pieces[i:i + 2] = [pieces[i] + " " + pieces[i + 1]]
+    return pieces
+
+
+def _presplit_blocks_for_simple(
+    blocks: list[tuple[str, float, float, str]],
+    max_block_sec: float = _SIMPLE_MAX_BLOCK_SEC,
+    min_subblock_sec: float = _SIMPLE_MIN_SUBBLOCK_SEC,
+) -> tuple[list[tuple[str, float, float, str]], int]:
+    """Split overly-long source blocks before per-segment translation.
+
+    Each block longer than *max_block_sec* is broken into N sub-blocks
+    where ``N = ceil(duration / max_block_sec)``.  Sub-block timings are
+    distributed proportionally to text length so dense passages keep
+    more time than short tails.  Sub-block IDs are suffixed (e.g.
+    ``"7a"``, ``"7b"``) to remain unique without colliding with
+    original numeric IDs.
+
+    Returns a tuple of ``(new_blocks, n_split)`` where *n_split* is the
+    number of original blocks that were split (for logging).
+    """
+    out: list[tuple[str, float, float, str]] = []
+    n_split = 0
+    for idx, start, end, text in blocks:
+        dur = end - start
+        if dur <= max_block_sec:
+            out.append((idx, start, end, text))
+            continue
+
+        # How many sub-blocks?  Use ceil so even a tiny excess triggers
+        # an extra piece (e.g. 13 s / 12 s → 2 pieces, not 1).  Cap so
+        # each piece stays above the readable minimum.
+        import math
+        n_pieces = max(2, math.ceil(dur / max_block_sec))
+        n_pieces = min(n_pieces, max(2, int(dur // min_subblock_sec)))
+
+        pieces = _split_text_for_duration(text, n_pieces)
+        if len(pieces) < 2:
+            out.append((idx, start, end, text))
+            continue
+
+        # Distribute time proportionally to character count.
+        lengths = [max(1, len(p)) for p in pieces]
+        total = sum(lengths)
+        cursor = start
+        for i, piece in enumerate(pieces):
+            share = dur * (lengths[i] / total)
+            piece_end = end if i == len(pieces) - 1 else cursor + share
+            sub_idx = f"{idx}{chr(ord('a') + i)}" if len(pieces) <= 26 else f"{idx}.{i + 1}"
+            out.append((sub_idx, cursor, piece_end, piece))
+            cursor = piece_end
+        n_split += 1
+    return out, n_split
+
+
+def translate_srt_simple(
+    srt_text: str,
+    client: OpenAI,
+    *,
+    llm_model: str = "translategemma",
+    source_language: str = "auto",
+    target_language: str = "English",
+    usage_tracker: LLMUsageTracker | None = None,
+    temperature: float = 0.1,
+    max_block_sec: float = _SIMPLE_MAX_BLOCK_SEC,
+) -> str:
+    """Translate every SRT entry independently with a template prompt.
+
+    Designed for lightweight task-specific translation models such as
+    ``translategemma`` that expect a single-sentence prompt of the form
+    described in :data:`SIMPLE_TRANSLATION_TEMPLATE`.
+
+    Differs from :func:`translate_srt` in that it does **not** use
+    visual context, batching, or duration budgeting — each subtitle
+    block is translated on its own.  This is faster on small models
+    and avoids the JSON-formatting failure modes that weak LLMs hit
+    when asked to return structured arrays.
+
+    Source blocks longer than *max_block_sec* are pre-split on
+    sentence/clause boundaries before translation so the assembler can
+    fit each translated chunk into a realistic time slot — this
+    prevents the "85 s of audio in a 29 s slot" failure mode that
+    happens when a small translation model expands a long input.
+
+    Parameters:
+        srt_text:         Source SRT string.
+        client:           Initialised OpenAI-compatible client.
+        llm_model:        Translation model name.
+        source_language:  Canonical language name (e.g. ``English``) or
+                          ``auto`` — when auto, defaults to ``English``.
+        target_language:  Canonical target language name.
+        max_block_sec:    Source blocks longer than this (seconds) are
+                          pre-split on sentence boundaries.
+
+    Returns:
+        Translated SRT preserving the original timestamps (sub-block
+        boundaries inserted where pre-splitting was applied).
+    """
+    src = source_language if source_language and source_language != "auto" else "English"
+    tgt = resolve_language(target_language)
+    src = resolve_language(src)
+
+    raw_blocks = parse_blocks(srt_text)
+    blocks, n_split = _presplit_blocks_for_simple(
+        raw_blocks, max_block_sec=max_block_sec,
+    )
+    if n_split:
+        log.info(
+            "Pre-split %d source blocks > %.1fs → %d total entries",
+            n_split, max_block_sec, len(blocks),
+        )
+    log.info(
+        "Simple-translate %d entries via %s (%s → %s)",
+        len(blocks), llm_model, src, tgt,
+    )
+
+    translated: list[tuple[str, float, float, str]] = []
+    for idx, start, end, text in tqdm(blocks, desc="Translating"):
+        original = text.strip()
+        if not original:
+            translated.append((idx, start, end, original))
+            continue
+
+        prompt = _build_simple_prompt(original, src, tgt)
+        try:
+            resp = client.chat.completions.create(
+                model=llm_model,
+                temperature=temperature,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            if usage_tracker is not None:
+                usage_tracker.record("translate", llm_model, resp)
+            reply = resp.choices[0].message.content or ""
+        except Exception as exc:  # noqa: BLE001
+            log.warning(
+                "Simple translation failed for entry %s: %s — keeping original",
+                idx, exc,
+            )
+            translated.append((idx, start, end, original))
+            continue
+
+        cleaned = _strip_simple_translation(_clean_llm_text(reply))
+        if not cleaned:
+            log.warning(
+                "Empty translation for entry %s — keeping original", idx,
+            )
+            cleaned = original
+        translated.append((idx, start, end, cleaned))
+
+    # Renumber sequentially — pre-splitting may have produced
+    # non-numeric IDs (e.g. ``"7a"``, ``"7b"``) that downstream tools
+    # expecting plain integer SRT indices would reject.
+    renumbered = [
+        (str(i), start, end, text)
+        for i, (_idx, start, end, text) in enumerate(translated, 1)
+    ]
+    return blocks_to_text(renumbered)

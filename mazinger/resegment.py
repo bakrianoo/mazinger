@@ -495,6 +495,123 @@ def _distribute_timestamps(
 #  Public API
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def _merge_short_segments(
+    segments: list[tuple[float, float, str]],
+    *,
+    min_dur: float = MIN_DUR,
+    max_dur: float = MAX_DUR,
+    max_chars: int = MAX_CHARS,
+) -> list[tuple[float, float, str]]:
+    """Merge segments shorter than *min_dur* into the closest neighbour.
+
+    "Closest" is decided by the silence gap on each side: a short tail
+    1 s after the previous segment ends but 5 s before the next one
+    starts is merged backwards; a short snippet just before a tightly
+    following segment is merged forwards.
+
+    Merge candidates that would push the resulting segment past
+    *max_dur* or *max_chars* are skipped (kept as-is) to avoid producing
+    over-long captions just to absorb a tiny tail.
+    """
+    if len(segments) < 2:
+        return list(segments)
+
+    out = [list(s) for s in segments]
+    i = 0
+    merged_count = 0
+    while i < len(out):
+        start, end, text = out[i]
+        dur = end - start
+        if dur >= min_dur:
+            i += 1
+            continue
+
+        prev = out[i - 1] if i > 0 else None
+        nxt = out[i + 1] if i + 1 < len(out) else None
+
+        # Decide which neighbour is "closer" (smaller silence gap).
+        gap_prev = (start - prev[1]) if prev is not None else float("inf")
+        gap_next = (nxt[0] - end) if nxt is not None else float("inf")
+
+        # Reject neighbours that would exceed the limits after merge.
+        def _fits(neighbour):
+            new_start = min(start, neighbour[0])
+            new_end = max(end, neighbour[1])
+            new_text_len = len(neighbour[2]) + 1 + len(text)
+            return (new_end - new_start) <= max_dur and new_text_len <= max_chars
+
+        prev_ok = prev is not None and _fits(prev)
+        next_ok = nxt is not None and _fits(nxt)
+
+        target = None
+        if prev_ok and next_ok:
+            target = "prev" if gap_prev <= gap_next else "next"
+        elif prev_ok:
+            target = "prev"
+        elif next_ok:
+            target = "next"
+
+        # Hard fallback: if both neighbours technically exceed max_dur but
+        # one is available, still absorb the short tail — the resulting
+        # slight overflow is far better than a 0.4 s standalone segment
+        # that TTS can't speak coherently.
+        if target is None:
+            if prev is not None and nxt is not None:
+                target = "prev" if gap_prev <= gap_next else "next"
+            elif prev is not None:
+                target = "prev"
+            elif nxt is not None:
+                target = "next"
+
+        if target == "prev":
+            prev[1] = max(prev[1], end)
+            prev[2] = (prev[2].rstrip() + " " + text.lstrip()).strip()
+            del out[i]
+            merged_count += 1
+            # Re-check the merged segment from its position (no index inc).
+            continue
+        if target == "next":
+            nxt[0] = min(nxt[0], start)
+            nxt[2] = (text.rstrip() + " " + nxt[2].lstrip()).strip()
+            del out[i]
+            merged_count += 1
+            # Don't increment: the slot now holds the (former) next entry,
+            # which is already long enough — but loop will re-evaluate.
+            continue
+
+        # Neither neighbour fits — leave the short segment alone.
+        i += 1
+
+    if merged_count:
+        log.info(
+            "Short-segment merge: absorbed %d entries shorter than %.1fs "
+            "into their nearest neighbour (%d -> %d)",
+            merged_count, min_dur, len(segments), len(out),
+        )
+    return [tuple(s) for s in out]
+
+
+def absorb_short_segments(
+    srt_text: str,
+    *,
+    min_dur: float = MIN_DUR,
+    max_dur: float = MAX_DUR,
+    max_chars: int = MAX_CHARS,
+) -> str:
+    """Public helper: absorb tiny segments in *srt_text* into a neighbour.
+
+    Pure-text wrapper around :func:`_merge_short_segments` so callers
+    that already have a final SRT (e.g. a cached one) can apply the
+    same cleanup without re-running the LLM merge/split phases.
+    """
+    blocks = parse_blocks(sanitize(srt_text))
+    segs = [(s, e, t) for _, s, e, t in blocks]
+    cleaned = _merge_short_segments(
+        segs, min_dur=min_dur, max_dur=max_dur, max_chars=max_chars,
+    )
+    return build(cleaned)
+
+
 def resegment_srt(
     srt_text: str,
     *,
@@ -555,9 +672,16 @@ def resegment_srt(
         for (s, e), seg_text in zip(time_ranges, segments):
             resegmented.append((s, e, seg_text))
 
+    # ── Phase 3: absorb tiny tail segments into their nearest neighbour ──
+    before_short_merge = len(resegmented)
+    resegmented = _merge_short_segments(
+        resegmented, min_dur=MIN_DUR, max_dur=max_dur, max_chars=max_chars,
+    )
+
     log.info(
-        "Re-segmented %d -> %d -> %d (original -> merged -> split, LLM split calls: %d)",
-        len(blocks), len(merged), len(resegmented), split_calls,
+        "Re-segmented %d -> %d -> %d -> %d "
+        "(original -> merged -> split -> short-absorbed, LLM split calls: %d)",
+        len(blocks), len(merged), before_short_merge, len(resegmented), split_calls,
     )
     return build(resegmented)
 

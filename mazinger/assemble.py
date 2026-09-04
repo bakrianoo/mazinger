@@ -307,18 +307,41 @@ def assemble_timeline(
             else:
                 audio = _fade(audio, sample_rate, fade_in_ms=15, fade_out_ms=200)
         else:
-            # Non-last segments: NEVER trim.  If the tempo-stretched audio
-            # still slightly overflows, let it overlap into the gap — the
-            # additive paste (+=) blends it naturally.  This preserves
-            # complete speech without any hard cuts.
-            if len(audio) > budget_samps:
-                overflow_secs = (len(audio) - budget_samps) / sample_rate
+            # Non-last segments: cap the spill so we *never* get two voices
+            # speaking at the same time.  A small overlap (≤ segment_gap_ms)
+            # is harmless and blends naturally; anything larger is trimmed
+            # at the quietest point with a fade-out (same logic as the
+            # last-segment branch).  This protects the listener from
+            # cascading TTS overruns when a translation is much longer
+            # than the source slot or when ``--max-tempo`` can't squeeze
+            # the audio to fit.
+            next_start_samp = int(valid_segs[seg_i + 1]["start"] * sample_rate)
+            # Maximum samples we may write into the timeline starting at
+            # start_samp without colliding with the next segment.
+            max_len = max(0, next_start_samp - start_samp)
+
+            if len(audio) > max_len:
+                overflow_secs = (len(audio) - max_len) / sample_rate
                 overflow_total += overflow_secs
-                log.debug(
-                    "Seg %s: overflows by %.2fs after tempo — allowing overlap",
-                    seg["idx"], overflow_secs,
-                )
-            audio = _fade(audio, sample_rate, fade_in_ms=15, fade_out_ms=50)
+                trim_at = _find_last_silence(audio, sample_rate, max_len)
+                # Guarantee no overlap even if no silence was found.
+                trim_at = min(trim_at, max_len)
+                audio = audio[:trim_at]
+                stats["trimmed"] += 1
+                if overflow_secs > 0.2:
+                    log.warning(
+                        "Seg %s: trimmed %.2fs to prevent overlapping the "
+                        "next segment (budget %.2fs, audio after stretch "
+                        "%.2fs). Source SRT entry is likely too long for "
+                        "its time slot — consider re-running with "
+                        "--force-reset, or lower --duration-budget / raise "
+                        "--max-tempo.",
+                        seg["idx"], overflow_secs,
+                        budget_dur, len(raw_audio) / sample_rate,
+                    )
+                audio = _fade(audio, sample_rate, fade_in_ms=15, fade_out_ms=120)
+            else:
+                audio = _fade(audio, sample_rate, fade_in_ms=15, fade_out_ms=50)
 
         # -- Step 3: paste at SRT start time ------------------------------
         end_samp = min(start_samp + len(audio), total_samples)

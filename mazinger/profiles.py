@@ -163,6 +163,105 @@ _THEME_REF_TEXTS = {
         "Dalle profondità dell'oceano alle vaste distese dello spazio, "
         "ogni scoperta trasforma la nostra comprensione del mondo che ci circonda."
     ),
+    # ── OmniVoice-extended languages ──────────────────────────────────
+    "Arabic": (
+        "مرحباً بالجميع، اليوم سنستكشف معاً شيئاً مذهلاً حقاً. "
+        "على مرّ التاريخ، تساءل الفلاسفة والعلماء عن جوهر الوجود ذاته، "
+        "ودفعوا حدود المعرفة من خلال الملاحظة والتجربة والفضول الخالص. "
+        "من أعماق المحيطات إلى أقاصي الفضاء الشاسع، "
+        "كل اكتشاف يغيّر فهمنا للعالم من حولنا."
+    ),
+    "Cantonese": (
+        "大家好，今日我哋一齊嚟探索一啲真係好精彩嘅嘢。"
+        "喺歷史長河入面，哲學家同科學家一直都喺度質疑存在嘅本質，"
+        "透過觀察、實驗同純粹嘅好奇心去推動知識嘅邊界。"
+        "由深海嘅奧秘到浩瀚嘅宇宙，"
+        "每一個突破都改變咗我哋對世界嘅認識。"
+    ),
+    "Czech": (
+        "Vítejte všichni, dnes společně prozkoumáme něco opravdu fascinujícího. "
+        "V průběhu dějin filosofové a vědci zpochybňovali samotnou podstatu existence "
+        "a posouvali hranice poznání prostřednictvím pozorování, experimentů a čisté zvědavosti. "
+        "Od hlubin oceánu po rozlehlé prostory vesmíru "
+        "každý objev proměňuje naše chápání světa kolem nás."
+    ),
+    "Dutch": (
+        "Welkom allemaal, vandaag gaan we samen iets werkelijk fascinerends verkennen. "
+        "Door de hele geschiedenis heen hebben filosofen en wetenschappers de essentie van het bestaan bevraagd "
+        "en grenzen verlegd door observatie, experimenten en pure nieuwsgierigheid. "
+        "Van de diepten van de oceaan tot de uitgestrekte ruimte, "
+        "elke doorbraak verandert ons begrip van de wereld om ons heen."
+    ),
+    "Finnish": (
+        "Tervetuloa kaikki, tänään tutkimme yhdessä jotain todella kiehtovaa. "
+        "Kautta historian filosofit ja tieteilijät ovat kyseenalaistaneet olemassaolon olemuksen "
+        "ja siirtäneet tiedon rajoja havainnoinnin, kokeiden ja puhtaan uteliaisuuden avulla. "
+        "Valtamerten syvyyksistä avaruuden äärettömiin ulottuvuuksiin "
+        "jokainen läpimurto muuttaa käsitystämme ympäröivästä maailmasta."
+    ),
+    "Greek": (
+        "Καλώς ήρθατε όλοι, σήμερα θα εξερευνήσουμε μαζί κάτι πραγματικά συναρπαστικό. "
+        "Στο πέρασμα της ιστορίας, φιλόσοφοι και επιστήμονες αμφισβήτησαν την ίδια την ουσία της ύπαρξης, "
+        "ωθώντας τα όρια μέσω της παρατήρησης, του πειραματισμού και της αμιγούς περιέργειας. "
+        "Από τα βάθη του ωκεανού μέχρι τις απέραντες εκτάσεις του διαστήματος, "
+        "κάθε ανακάλυψη μεταμορφώνει την κατανόησή μας για τον κόσμο γύρω μας."
+    ),
+    "Hindi": (
+        "सभी का स्वागत है, आज हम मिलकर कुछ वाकई अद्भुत खोजने वाले हैं। "
+        "पूरे इतिहास में दार्शनिकों और वैज्ञानिकों ने अस्तित्व के सार पर सवाल उठाए हैं, "
+        "अवलोकन, प्रयोग और विशुद्ध जिज्ञासा के माध्यम से ज्ञान की सीमाओं को आगे बढ़ाया है। "
+        "समुद्र की गहराइयों से लेकर अंतरिक्ष के विशाल विस्तार तक, "
+        "हर खोज हमारे आसपास की दुनिया की समझ को बदल देती है।"
+    ),
+    "Indonesian": (
+        "Selamat datang semuanya, hari ini kita akan menjelajahi sesuatu yang benar-benar menakjubkan. "
+        "Sepanjang sejarah, para filsuf dan ilmuwan telah mempertanyakan hakikat keberadaan itu sendiri, "
+        "mendorong batas-batas pengetahuan melalui pengamatan, eksperimen, dan rasa ingin tahu yang murni. "
+        "Dari kedalaman lautan hingga hamparan luas angkasa, "
+        "setiap terobosan mengubah pemahaman kita tentang dunia di sekitar kita."
+    ),
+    "Polish": (
+        "Witajcie wszyscy, dziś wspólnie odkryjemy coś naprawdę fascynującego. "
+        "Na przestrzeni dziejów filozofowie i naukowcy kwestionowali samą istotę istnienia, "
+        "przesuwając granice poznania poprzez obserwację, eksperyment i czystą ciekawość. "
+        "Od głębin oceanu po bezkresne przestrzenie kosmosu "
+        "każde odkrycie zmienia nasze rozumienie otaczającego nas świata."
+    ),
+    "Romanian": (
+        "Bun venit tuturor, astăzi vom explora împreună ceva cu adevărat fascinant. "
+        "De-a lungul istoriei, filozofii și oamenii de știință au pus la îndoială însăși esența existenței, "
+        "împingând granițele cunoașterii prin observație, experimentare și pură curiozitate. "
+        "Din adâncurile oceanului până la întinderile vaste ale spațiului, "
+        "fiecare descoperire ne transformă înțelegerea lumii din jurul nostru."
+    ),
+    "Thai": (
+        "สวัสดีทุกท่าน วันนี้เราจะมาสำรวจสิ่งที่น่าทึ่งอย่างแท้จริงร่วมกัน "
+        "ตลอดประวัติศาสตร์ นักปรัชญาและนักวิทยาศาสตร์ได้ตั้งคำถามถึงแก่นแท้ของการดำรงอยู่ "
+        "ผลักดันขอบเขตความรู้ผ่านการสังเกต การทดลอง และความอยากรู้อยากเห็นอันบริสุทธิ์ "
+        "จากส่วนลึกของมหาสมุทรไปจนถึงห้วงอวกาศอันกว้างใหญ่ "
+        "ทุกการค้นพบเปลี่ยนแปลงความเข้าใจของเราเกี่ยวกับโลกรอบตัว"
+    ),
+    "Turkish": (
+        "Herkese hoş geldiniz, bugün birlikte gerçekten büyüleyici bir şeyi keşfedeceğiz. "
+        "Tarih boyunca filozoflar ve bilim insanları varoluşun özünü sorgulamış, "
+        "gözlem, deney ve saf merak yoluyla bilginin sınırlarını zorlamıştır. "
+        "Okyanusların derinliklerinden uzayın uçsuz bucaksız genişliklerine kadar "
+        "her buluş çevremizdeki dünyaya bakışımızı değiştirmektedir."
+    ),
+    "Ukrainian": (
+        "Ласкаво просимо всіх, сьогодні ми разом дослідимо щось по-справжньому захопливе. "
+        "Впродовж історії філософи та науковці ставили під сумнів саму сутність буття, "
+        "розсуваючи межі пізнання через спостереження, експерименти та чисту допитливість. "
+        "Від глибин океану до безмежних просторів космосу "
+        "кожне відкриття змінює наше розуміння світу навколо нас."
+    ),
+    "Vietnamese": (
+        "Xin chào tất cả mọi người, hôm nay chúng ta sẽ cùng khám phá điều gì đó thực sự tuyệt vời. "
+        "Xuyên suốt lịch sử, các nhà triết học và khoa học đã đặt câu hỏi về bản chất của sự tồn tại, "
+        "mở rộng ranh giới tri thức thông qua quan sát, thí nghiệm và sự tò mò thuần khiết. "
+        "Từ vực sâu đại dương đến những khoảng không bao la của vũ trụ, "
+        "mỗi khám phá đều thay đổi cách chúng ta hiểu về thế giới xung quanh."
+    ),
 }
 
 VOICE_THEMES: dict[str, dict] = {
@@ -179,6 +278,20 @@ VOICE_THEMES: dict[str, dict] = {
             "Portuguese": "Masculino, 35 anos, barítono, voz quente e firme, narrador profissional com dicção clara",
             "Spanish": "Masculino, 35 años, barítono, voz cálida y firme, narrador profesional con dicción clara",
             "Italian": "Maschile, 35 anni, baritono, voce calda e stabile, narratore professionale con dizione chiara",
+            "Arabic": "male, 35 years old, baritone, warm and steady, professional narrator",
+            "Cantonese": "male, 35 years old, baritone, warm and steady, professional narrator",
+            "Czech": "male, 35 years old, baritone, warm and steady, professional narrator",
+            "Dutch": "male, 35 years old, baritone, warm and steady, professional narrator",
+            "Finnish": "male, 35 years old, baritone, warm and steady, professional narrator",
+            "Greek": "male, 35 years old, baritone, warm and steady, professional narrator",
+            "Hindi": "male, 35 years old, baritone, warm and steady, professional narrator",
+            "Indonesian": "male, 35 years old, baritone, warm and steady, professional narrator",
+            "Polish": "male, 35 years old, baritone, warm and steady, professional narrator",
+            "Romanian": "male, 35 years old, baritone, warm and steady, professional narrator",
+            "Thai": "male, 35 years old, baritone, warm and steady, professional narrator",
+            "Turkish": "male, 35 years old, baritone, warm and steady, professional narrator",
+            "Ukrainian": "male, 35 years old, baritone, warm and steady, professional narrator",
+            "Vietnamese": "male, 35 years old, baritone, warm and steady, professional narrator",
         },
     },
     "narrator-f": {
@@ -194,6 +307,20 @@ VOICE_THEMES: dict[str, dict] = {
             "Portuguese": "Feminino, 30 anos, mezzo-soprano, voz suave e envolvente, narradora profissional com entrega confiante",
             "Spanish": "Femenino, 30 años, mezzosoprano, voz suave y cautivadora, narradora profesional con entrega segura",
             "Italian": "Femminile, 30 anni, mezzosoprano, voce fluida e coinvolgente, narratrice professionale con tono sicuro",
+            "Arabic": "female, 30 years old, mezzo-soprano, smooth and engaging, professional narrator",
+            "Cantonese": "female, 30 years old, mezzo-soprano, smooth and engaging, professional narrator",
+            "Czech": "female, 30 years old, mezzo-soprano, smooth and engaging, professional narrator",
+            "Dutch": "female, 30 years old, mezzo-soprano, smooth and engaging, professional narrator",
+            "Finnish": "female, 30 years old, mezzo-soprano, smooth and engaging, professional narrator",
+            "Greek": "female, 30 years old, mezzo-soprano, smooth and engaging, professional narrator",
+            "Hindi": "female, 30 years old, mezzo-soprano, smooth and engaging, professional narrator",
+            "Indonesian": "female, 30 years old, mezzo-soprano, smooth and engaging, professional narrator",
+            "Polish": "female, 30 years old, mezzo-soprano, smooth and engaging, professional narrator",
+            "Romanian": "female, 30 years old, mezzo-soprano, smooth and engaging, professional narrator",
+            "Thai": "female, 30 years old, mezzo-soprano, smooth and engaging, professional narrator",
+            "Turkish": "female, 30 years old, mezzo-soprano, smooth and engaging, professional narrator",
+            "Ukrainian": "female, 30 years old, mezzo-soprano, smooth and engaging, professional narrator",
+            "Vietnamese": "female, 30 years old, mezzo-soprano, smooth and engaging, professional narrator",
         },
     },
     "young-m": {
@@ -209,6 +336,20 @@ VOICE_THEMES: dict[str, dict] = {
             "Portuguese": "Masculino, 22 anos, tenor, enérgico e descontraído, tom conversacional jovem e natural",
             "Spanish": "Masculino, 22 años, tenor, enérgico y relajado, tono conversacional joven y natural",
             "Italian": "Maschile, 22 anni, tenore, energico e disinvolto, tono conversazionale giovane e naturale",
+            "Arabic": "male, 22 years old, tenor, energetic and casual, youthful conversational tone",
+            "Cantonese": "male, 22 years old, tenor, energetic and casual, youthful conversational tone",
+            "Czech": "male, 22 years old, tenor, energetic and casual, youthful conversational tone",
+            "Dutch": "male, 22 years old, tenor, energetic and casual, youthful conversational tone",
+            "Finnish": "male, 22 years old, tenor, energetic and casual, youthful conversational tone",
+            "Greek": "male, 22 years old, tenor, energetic and casual, youthful conversational tone",
+            "Hindi": "male, 22 years old, tenor, energetic and casual, youthful conversational tone",
+            "Indonesian": "male, 22 years old, tenor, energetic and casual, youthful conversational tone",
+            "Polish": "male, 22 years old, tenor, energetic and casual, youthful conversational tone",
+            "Romanian": "male, 22 years old, tenor, energetic and casual, youthful conversational tone",
+            "Thai": "male, 22 years old, tenor, energetic and casual, youthful conversational tone",
+            "Turkish": "male, 22 years old, tenor, energetic and casual, youthful conversational tone",
+            "Ukrainian": "male, 22 years old, tenor, energetic and casual, youthful conversational tone",
+            "Vietnamese": "male, 22 years old, tenor, energetic and casual, youthful conversational tone",
         },
     },
     "young-f": {
@@ -224,6 +365,20 @@ VOICE_THEMES: dict[str, dict] = {
             "Portuguese": "Feminino, 22 anos, soprano, voz brilhante e alegre, estilo conversacional jovem e amigável",
             "Spanish": "Femenino, 22 años, soprano, voz brillante y alegre, estilo conversacional joven y amigable",
             "Italian": "Femminile, 22 anni, soprano, voce brillante e allegra, stile conversazionale giovane e amichevole",
+            "Arabic": "female, 22 years old, soprano, bright and cheerful, friendly youthful conversational style",
+            "Cantonese": "female, 22 years old, soprano, bright and cheerful, friendly youthful conversational style",
+            "Czech": "female, 22 years old, soprano, bright and cheerful, friendly youthful conversational style",
+            "Dutch": "female, 22 years old, soprano, bright and cheerful, friendly youthful conversational style",
+            "Finnish": "female, 22 years old, soprano, bright and cheerful, friendly youthful conversational style",
+            "Greek": "female, 22 years old, soprano, bright and cheerful, friendly youthful conversational style",
+            "Hindi": "female, 22 years old, soprano, bright and cheerful, friendly youthful conversational style",
+            "Indonesian": "female, 22 years old, soprano, bright and cheerful, friendly youthful conversational style",
+            "Polish": "female, 22 years old, soprano, bright and cheerful, friendly youthful conversational style",
+            "Romanian": "female, 22 years old, soprano, bright and cheerful, friendly youthful conversational style",
+            "Thai": "female, 22 years old, soprano, bright and cheerful, friendly youthful conversational style",
+            "Turkish": "female, 22 years old, soprano, bright and cheerful, friendly youthful conversational style",
+            "Ukrainian": "female, 22 years old, soprano, bright and cheerful, friendly youthful conversational style",
+            "Vietnamese": "female, 22 years old, soprano, bright and cheerful, friendly youthful conversational style",
         },
     },
     "deep-m": {
@@ -239,6 +394,20 @@ VOICE_THEMES: dict[str, dict] = {
             "Portuguese": "Masculino, 45 anos, baixo-barítono, voz profunda e imponente, presença autoritária com ritmo comedido",
             "Spanish": "Masculino, 45 años, bajo-barítono, voz profunda e imponente, presencia autoritaria con ritmo mesurado",
             "Italian": "Maschile, 45 anni, basso-baritono, voce profonda e imponente, presenza autorevole con ritmo misurato",
+            "Arabic": "male, 45 years old, bass-baritone, deep and commanding, authoritative with measured pacing",
+            "Cantonese": "male, 45 years old, bass-baritone, deep and commanding, authoritative with measured pacing",
+            "Czech": "male, 45 years old, bass-baritone, deep and commanding, authoritative with measured pacing",
+            "Dutch": "male, 45 years old, bass-baritone, deep and commanding, authoritative with measured pacing",
+            "Finnish": "male, 45 years old, bass-baritone, deep and commanding, authoritative with measured pacing",
+            "Greek": "male, 45 years old, bass-baritone, deep and commanding, authoritative with measured pacing",
+            "Hindi": "male, 45 years old, bass-baritone, deep and commanding, authoritative with measured pacing",
+            "Indonesian": "male, 45 years old, bass-baritone, deep and commanding, authoritative with measured pacing",
+            "Polish": "male, 45 years old, bass-baritone, deep and commanding, authoritative with measured pacing",
+            "Romanian": "male, 45 years old, bass-baritone, deep and commanding, authoritative with measured pacing",
+            "Thai": "male, 45 years old, bass-baritone, deep and commanding, authoritative with measured pacing",
+            "Turkish": "male, 45 years old, bass-baritone, deep and commanding, authoritative with measured pacing",
+            "Ukrainian": "male, 45 years old, bass-baritone, deep and commanding, authoritative with measured pacing",
+            "Vietnamese": "male, 45 years old, bass-baritone, deep and commanding, authoritative with measured pacing",
         },
     },
     "deep-f": {
@@ -254,6 +423,20 @@ VOICE_THEMES: dict[str, dict] = {
             "Portuguese": "Feminino, 45 anos, contralto, voz profunda e ressonante, presença imponente com ritmo deliberado",
             "Spanish": "Femenino, 45 años, contralto, voz profunda y resonante, presencia imponente con ritmo deliberado",
             "Italian": "Femminile, 45 anni, contralto, voce profonda e risonante, presenza imponente con ritmo deliberato",
+            "Arabic": "female, 45 years old, contralto, deep and resonant, commanding presence with deliberate pacing",
+            "Cantonese": "female, 45 years old, contralto, deep and resonant, commanding presence with deliberate pacing",
+            "Czech": "female, 45 years old, contralto, deep and resonant, commanding presence with deliberate pacing",
+            "Dutch": "female, 45 years old, contralto, deep and resonant, commanding presence with deliberate pacing",
+            "Finnish": "female, 45 years old, contralto, deep and resonant, commanding presence with deliberate pacing",
+            "Greek": "female, 45 years old, contralto, deep and resonant, commanding presence with deliberate pacing",
+            "Hindi": "female, 45 years old, contralto, deep and resonant, commanding presence with deliberate pacing",
+            "Indonesian": "female, 45 years old, contralto, deep and resonant, commanding presence with deliberate pacing",
+            "Polish": "female, 45 years old, contralto, deep and resonant, commanding presence with deliberate pacing",
+            "Romanian": "female, 45 years old, contralto, deep and resonant, commanding presence with deliberate pacing",
+            "Thai": "female, 45 years old, contralto, deep and resonant, commanding presence with deliberate pacing",
+            "Turkish": "female, 45 years old, contralto, deep and resonant, commanding presence with deliberate pacing",
+            "Ukrainian": "female, 45 years old, contralto, deep and resonant, commanding presence with deliberate pacing",
+            "Vietnamese": "female, 45 years old, contralto, deep and resonant, commanding presence with deliberate pacing",
         },
     },
     "warm-m": {
@@ -269,6 +452,20 @@ VOICE_THEMES: dict[str, dict] = {
             "Portuguese": "Masculino, 38 anos, barítono, voz quente e suave, ritmo reconfortante com tom acolhedor",
             "Spanish": "Masculino, 38 años, barítono, voz cálida y suave, ritmo reconfortante con tono acogedor",
             "Italian": "Maschile, 38 anni, baritono, voce calda e gentile, ritmo rassicurante con tono confortante",
+            "Arabic": "male, 38 years old, baritone, warm and gentle, comforting pace with reassuring tone",
+            "Cantonese": "male, 38 years old, baritone, warm and gentle, comforting pace with reassuring tone",
+            "Czech": "male, 38 years old, baritone, warm and gentle, comforting pace with reassuring tone",
+            "Dutch": "male, 38 years old, baritone, warm and gentle, comforting pace with reassuring tone",
+            "Finnish": "male, 38 years old, baritone, warm and gentle, comforting pace with reassuring tone",
+            "Greek": "male, 38 years old, baritone, warm and gentle, comforting pace with reassuring tone",
+            "Hindi": "male, 38 years old, baritone, warm and gentle, comforting pace with reassuring tone",
+            "Indonesian": "male, 38 years old, baritone, warm and gentle, comforting pace with reassuring tone",
+            "Polish": "male, 38 years old, baritone, warm and gentle, comforting pace with reassuring tone",
+            "Romanian": "male, 38 years old, baritone, warm and gentle, comforting pace with reassuring tone",
+            "Thai": "male, 38 years old, baritone, warm and gentle, comforting pace with reassuring tone",
+            "Turkish": "male, 38 years old, baritone, warm and gentle, comforting pace with reassuring tone",
+            "Ukrainian": "male, 38 years old, baritone, warm and gentle, comforting pace with reassuring tone",
+            "Vietnamese": "male, 38 years old, baritone, warm and gentle, comforting pace with reassuring tone",
         },
     },
     "warm-f": {
@@ -284,6 +481,20 @@ VOICE_THEMES: dict[str, dict] = {
             "Portuguese": "Feminino, 38 anos, contralto, voz quente e reconfortante, ritmo suave com tom acolhedor",
             "Spanish": "Femenino, 38 años, contralto, voz cálida y reconfortante, ritmo suave con tono acogedor",
             "Italian": "Femminile, 38 anni, contralto, voce calda e rassicurante, ritmo dolce con tono confortante",
+            "Arabic": "female, 38 years old, alto, warm and soothing, gentle pace with comforting tone",
+            "Cantonese": "female, 38 years old, alto, warm and soothing, gentle pace with comforting tone",
+            "Czech": "female, 38 years old, alto, warm and soothing, gentle pace with comforting tone",
+            "Dutch": "female, 38 years old, alto, warm and soothing, gentle pace with comforting tone",
+            "Finnish": "female, 38 years old, alto, warm and soothing, gentle pace with comforting tone",
+            "Greek": "female, 38 years old, alto, warm and soothing, gentle pace with comforting tone",
+            "Hindi": "female, 38 years old, alto, warm and soothing, gentle pace with comforting tone",
+            "Indonesian": "female, 38 years old, alto, warm and soothing, gentle pace with comforting tone",
+            "Polish": "female, 38 years old, alto, warm and soothing, gentle pace with comforting tone",
+            "Romanian": "female, 38 years old, alto, warm and soothing, gentle pace with comforting tone",
+            "Thai": "female, 38 years old, alto, warm and soothing, gentle pace with comforting tone",
+            "Turkish": "female, 38 years old, alto, warm and soothing, gentle pace with comforting tone",
+            "Ukrainian": "female, 38 years old, alto, warm and soothing, gentle pace with comforting tone",
+            "Vietnamese": "female, 38 years old, alto, warm and soothing, gentle pace with comforting tone",
         },
     },
     "news-m": {
@@ -299,6 +510,20 @@ VOICE_THEMES: dict[str, dict] = {
             "Portuguese": "Masculino, 40 anos, barítono, voz nítida e articulada, estilo âncora de telejornal, tom autoritário e objetivo",
             "Spanish": "Masculino, 40 años, barítono, voz nítida y articulada, estilo presentador de noticias, tono autoritario y objetivo",
             "Italian": "Maschile, 40 anni, baritono, voce nitida e articolata, stile giornalista televisivo, tono autorevole e obiettivo",
+            "Arabic": "male, 40 years old, baritone, crisp and articulate, broadcast news anchor style, authoritative and objective",
+            "Cantonese": "male, 40 years old, baritone, crisp and articulate, broadcast news anchor style, authoritative and objective",
+            "Czech": "male, 40 years old, baritone, crisp and articulate, broadcast news anchor style, authoritative and objective",
+            "Dutch": "male, 40 years old, baritone, crisp and articulate, broadcast news anchor style, authoritative and objective",
+            "Finnish": "male, 40 years old, baritone, crisp and articulate, broadcast news anchor style, authoritative and objective",
+            "Greek": "male, 40 years old, baritone, crisp and articulate, broadcast news anchor style, authoritative and objective",
+            "Hindi": "male, 40 years old, baritone, crisp and articulate, broadcast news anchor style, authoritative and objective",
+            "Indonesian": "male, 40 years old, baritone, crisp and articulate, broadcast news anchor style, authoritative and objective",
+            "Polish": "male, 40 years old, baritone, crisp and articulate, broadcast news anchor style, authoritative and objective",
+            "Romanian": "male, 40 years old, baritone, crisp and articulate, broadcast news anchor style, authoritative and objective",
+            "Thai": "male, 40 years old, baritone, crisp and articulate, broadcast news anchor style, authoritative and objective",
+            "Turkish": "male, 40 years old, baritone, crisp and articulate, broadcast news anchor style, authoritative and objective",
+            "Ukrainian": "male, 40 years old, baritone, crisp and articulate, broadcast news anchor style, authoritative and objective",
+            "Vietnamese": "male, 40 years old, baritone, crisp and articulate, broadcast news anchor style, authoritative and objective",
         },
     },
     "news-f": {
@@ -314,6 +539,20 @@ VOICE_THEMES: dict[str, dict] = {
             "Portuguese": "Feminino, 36 anos, mezzo-soprano, voz clara e polida, estilo âncora de telejornal, composta e profissional",
             "Spanish": "Femenino, 36 años, mezzosoprano, voz clara y pulida, estilo presentadora de noticias, serena y profesional",
             "Italian": "Femminile, 36 anni, mezzosoprano, voce chiara e curata, stile giornalista televisiva, composta e professionale",
+            "Arabic": "female, 36 years old, mezzo-soprano, clear and polished, broadcast news anchor style, composed and professional",
+            "Cantonese": "female, 36 years old, mezzo-soprano, clear and polished, broadcast news anchor style, composed and professional",
+            "Czech": "female, 36 years old, mezzo-soprano, clear and polished, broadcast news anchor style, composed and professional",
+            "Dutch": "female, 36 years old, mezzo-soprano, clear and polished, broadcast news anchor style, composed and professional",
+            "Finnish": "female, 36 years old, mezzo-soprano, clear and polished, broadcast news anchor style, composed and professional",
+            "Greek": "female, 36 years old, mezzo-soprano, clear and polished, broadcast news anchor style, composed and professional",
+            "Hindi": "female, 36 years old, mezzo-soprano, clear and polished, broadcast news anchor style, composed and professional",
+            "Indonesian": "female, 36 years old, mezzo-soprano, clear and polished, broadcast news anchor style, composed and professional",
+            "Polish": "female, 36 years old, mezzo-soprano, clear and polished, broadcast news anchor style, composed and professional",
+            "Romanian": "female, 36 years old, mezzo-soprano, clear and polished, broadcast news anchor style, composed and professional",
+            "Thai": "female, 36 years old, mezzo-soprano, clear and polished, broadcast news anchor style, composed and professional",
+            "Turkish": "female, 36 years old, mezzo-soprano, clear and polished, broadcast news anchor style, composed and professional",
+            "Ukrainian": "female, 36 years old, mezzo-soprano, clear and polished, broadcast news anchor style, composed and professional",
+            "Vietnamese": "female, 36 years old, mezzo-soprano, clear and polished, broadcast news anchor style, composed and professional",
         },
     },
     "storyteller-m": {
@@ -329,6 +568,20 @@ VOICE_THEMES: dict[str, dict] = {
             "Portuguese": "Masculino, 50 anos, barítono, expressivo e dramático, rica dinâmica vocal com cadência narrativa cativante",
             "Spanish": "Masculino, 50 años, barítono, expresivo y dramático, rica dinámica vocal con cadencia narrativa cautivadora",
             "Italian": "Maschile, 50 anni, baritono, espressivo e drammatico, ricca dinamica vocale con cadenza narrativa avvincente",
+            "Arabic": "male, 50 years old, baritone, expressive and dramatic, rich vocal dynamics with captivating storytelling cadence",
+            "Cantonese": "male, 50 years old, baritone, expressive and dramatic, rich vocal dynamics with captivating storytelling cadence",
+            "Czech": "male, 50 years old, baritone, expressive and dramatic, rich vocal dynamics with captivating storytelling cadence",
+            "Dutch": "male, 50 years old, baritone, expressive and dramatic, rich vocal dynamics with captivating storytelling cadence",
+            "Finnish": "male, 50 years old, baritone, expressive and dramatic, rich vocal dynamics with captivating storytelling cadence",
+            "Greek": "male, 50 years old, baritone, expressive and dramatic, rich vocal dynamics with captivating storytelling cadence",
+            "Hindi": "male, 50 years old, baritone, expressive and dramatic, rich vocal dynamics with captivating storytelling cadence",
+            "Indonesian": "male, 50 years old, baritone, expressive and dramatic, rich vocal dynamics with captivating storytelling cadence",
+            "Polish": "male, 50 years old, baritone, expressive and dramatic, rich vocal dynamics with captivating storytelling cadence",
+            "Romanian": "male, 50 years old, baritone, expressive and dramatic, rich vocal dynamics with captivating storytelling cadence",
+            "Thai": "male, 50 years old, baritone, expressive and dramatic, rich vocal dynamics with captivating storytelling cadence",
+            "Turkish": "male, 50 years old, baritone, expressive and dramatic, rich vocal dynamics with captivating storytelling cadence",
+            "Ukrainian": "male, 50 years old, baritone, expressive and dramatic, rich vocal dynamics with captivating storytelling cadence",
+            "Vietnamese": "male, 50 years old, baritone, expressive and dramatic, rich vocal dynamics with captivating storytelling cadence",
         },
     },
     "storyteller-f": {
@@ -344,6 +597,20 @@ VOICE_THEMES: dict[str, dict] = {
             "Portuguese": "Feminino, 48 anos, mezzo-soprano, expressiva e evocativa, alcance vocal emotivo com ritmo narrativo encantador",
             "Spanish": "Femenino, 48 años, mezzosoprano, expresiva y evocadora, rango vocal emotivo con ritmo narrativo encantador",
             "Italian": "Femminile, 48 anni, mezzosoprano, espressiva ed evocativa, gamma vocale emotiva con ritmo narrativo incantevole",
+            "Arabic": "female, 48 years old, mezzo-soprano, expressive and evocative, emotive vocal range with enchanting storytelling rhythm",
+            "Cantonese": "female, 48 years old, mezzo-soprano, expressive and evocative, emotive vocal range with enchanting storytelling rhythm",
+            "Czech": "female, 48 years old, mezzo-soprano, expressive and evocative, emotive vocal range with enchanting storytelling rhythm",
+            "Dutch": "female, 48 years old, mezzo-soprano, expressive and evocative, emotive vocal range with enchanting storytelling rhythm",
+            "Finnish": "female, 48 years old, mezzo-soprano, expressive and evocative, emotive vocal range with enchanting storytelling rhythm",
+            "Greek": "female, 48 years old, mezzo-soprano, expressive and evocative, emotive vocal range with enchanting storytelling rhythm",
+            "Hindi": "female, 48 years old, mezzo-soprano, expressive and evocative, emotive vocal range with enchanting storytelling rhythm",
+            "Indonesian": "female, 48 years old, mezzo-soprano, expressive and evocative, emotive vocal range with enchanting storytelling rhythm",
+            "Polish": "female, 48 years old, mezzo-soprano, expressive and evocative, emotive vocal range with enchanting storytelling rhythm",
+            "Romanian": "female, 48 years old, mezzo-soprano, expressive and evocative, emotive vocal range with enchanting storytelling rhythm",
+            "Thai": "female, 48 years old, mezzo-soprano, expressive and evocative, emotive vocal range with enchanting storytelling rhythm",
+            "Turkish": "female, 48 years old, mezzo-soprano, expressive and evocative, emotive vocal range with enchanting storytelling rhythm",
+            "Ukrainian": "female, 48 years old, mezzo-soprano, expressive and evocative, emotive vocal range with enchanting storytelling rhythm",
+            "Vietnamese": "female, 48 years old, mezzo-soprano, expressive and evocative, emotive vocal range with enchanting storytelling rhythm",
         },
     },
     "kid-m": {
@@ -359,6 +626,20 @@ VOICE_THEMES: dict[str, dict] = {
             "Portuguese": "Menino, 8 anos, voz aguda infantil, inocente e animado, curioso e entusiasmado, voz clara e brilhante",
             "Spanish": "Niño, 8 años, voz aguda infantil, inocente y vivaz, curioso y entusiasta, voz clara y brillante",
             "Italian": "Bambino, 8 anni, voce acuta infantile, innocente e vivace, curioso ed entusiasta, voce chiara e brillante",
+            "Arabic": "boy, 8 years old, high-pitched child voice, innocent and lively, curious and enthusiastic, bright and clear",
+            "Cantonese": "boy, 8 years old, high-pitched child voice, innocent and lively, curious and enthusiastic, bright and clear",
+            "Czech": "boy, 8 years old, high-pitched child voice, innocent and lively, curious and enthusiastic, bright and clear",
+            "Dutch": "boy, 8 years old, high-pitched child voice, innocent and lively, curious and enthusiastic, bright and clear",
+            "Finnish": "boy, 8 years old, high-pitched child voice, innocent and lively, curious and enthusiastic, bright and clear",
+            "Greek": "boy, 8 years old, high-pitched child voice, innocent and lively, curious and enthusiastic, bright and clear",
+            "Hindi": "boy, 8 years old, high-pitched child voice, innocent and lively, curious and enthusiastic, bright and clear",
+            "Indonesian": "boy, 8 years old, high-pitched child voice, innocent and lively, curious and enthusiastic, bright and clear",
+            "Polish": "boy, 8 years old, high-pitched child voice, innocent and lively, curious and enthusiastic, bright and clear",
+            "Romanian": "boy, 8 years old, high-pitched child voice, innocent and lively, curious and enthusiastic, bright and clear",
+            "Thai": "boy, 8 years old, high-pitched child voice, innocent and lively, curious and enthusiastic, bright and clear",
+            "Turkish": "boy, 8 years old, high-pitched child voice, innocent and lively, curious and enthusiastic, bright and clear",
+            "Ukrainian": "boy, 8 years old, high-pitched child voice, innocent and lively, curious and enthusiastic, bright and clear",
+            "Vietnamese": "boy, 8 years old, high-pitched child voice, innocent and lively, curious and enthusiastic, bright and clear",
         },
     },
     "kid-f": {
@@ -374,6 +655,20 @@ VOICE_THEMES: dict[str, dict] = {
             "Portuguese": "Menina, 8 anos, voz aguda infantil, doce e alegre, brincalhona e animada, voz nítida e agradável",
             "Spanish": "Niña, 8 años, voz aguda infantil, dulce y alegre, juguetona y animada, voz nítida y agradable",
             "Italian": "Bambina, 8 anni, voce acuta infantile, dolce e allegra, giocosa e vivace, voce nitida e piacevole",
+            "Arabic": "girl, 8 years old, high-pitched child voice, sweet and cheerful, playful and animated, crisp and pleasant",
+            "Cantonese": "girl, 8 years old, high-pitched child voice, sweet and cheerful, playful and animated, crisp and pleasant",
+            "Czech": "girl, 8 years old, high-pitched child voice, sweet and cheerful, playful and animated, crisp and pleasant",
+            "Dutch": "girl, 8 years old, high-pitched child voice, sweet and cheerful, playful and animated, crisp and pleasant",
+            "Finnish": "girl, 8 years old, high-pitched child voice, sweet and cheerful, playful and animated, crisp and pleasant",
+            "Greek": "girl, 8 years old, high-pitched child voice, sweet and cheerful, playful and animated, crisp and pleasant",
+            "Hindi": "girl, 8 years old, high-pitched child voice, sweet and cheerful, playful and animated, crisp and pleasant",
+            "Indonesian": "girl, 8 years old, high-pitched child voice, sweet and cheerful, playful and animated, crisp and pleasant",
+            "Polish": "girl, 8 years old, high-pitched child voice, sweet and cheerful, playful and animated, crisp and pleasant",
+            "Romanian": "girl, 8 years old, high-pitched child voice, sweet and cheerful, playful and animated, crisp and pleasant",
+            "Thai": "girl, 8 years old, high-pitched child voice, sweet and cheerful, playful and animated, crisp and pleasant",
+            "Turkish": "girl, 8 years old, high-pitched child voice, sweet and cheerful, playful and animated, crisp and pleasant",
+            "Ukrainian": "girl, 8 years old, high-pitched child voice, sweet and cheerful, playful and animated, crisp and pleasant",
+            "Vietnamese": "girl, 8 years old, high-pitched child voice, sweet and cheerful, playful and animated, crisp and pleasant",
         },
     },
     "teen-m": {
@@ -389,6 +684,20 @@ VOICE_THEMES: dict[str, dict] = {
             "Portuguese": "Masculino, 16 anos, tenor mais agudo, levemente rouco, confiante e descontraído, estilo conversacional adolescente",
             "Spanish": "Masculino, 16 años, tenor más agudo, levemente ronco, seguro y relajado, estilo conversacional adolescente",
             "Italian": "Maschile, 16 anni, tenore più acuto, leggermente roco, sicuro e disinvolto, stile conversazionale adolescenziale",
+            "Arabic": "male, 16 years old, higher tenor, slightly husky, confident and laid-back, teenage conversational style",
+            "Cantonese": "male, 16 years old, higher tenor, slightly husky, confident and laid-back, teenage conversational style",
+            "Czech": "male, 16 years old, higher tenor, slightly husky, confident and laid-back, teenage conversational style",
+            "Dutch": "male, 16 years old, higher tenor, slightly husky, confident and laid-back, teenage conversational style",
+            "Finnish": "male, 16 years old, higher tenor, slightly husky, confident and laid-back, teenage conversational style",
+            "Greek": "male, 16 years old, higher tenor, slightly husky, confident and laid-back, teenage conversational style",
+            "Hindi": "male, 16 years old, higher tenor, slightly husky, confident and laid-back, teenage conversational style",
+            "Indonesian": "male, 16 years old, higher tenor, slightly husky, confident and laid-back, teenage conversational style",
+            "Polish": "male, 16 years old, higher tenor, slightly husky, confident and laid-back, teenage conversational style",
+            "Romanian": "male, 16 years old, higher tenor, slightly husky, confident and laid-back, teenage conversational style",
+            "Thai": "male, 16 years old, higher tenor, slightly husky, confident and laid-back, teenage conversational style",
+            "Turkish": "male, 16 years old, higher tenor, slightly husky, confident and laid-back, teenage conversational style",
+            "Ukrainian": "male, 16 years old, higher tenor, slightly husky, confident and laid-back, teenage conversational style",
+            "Vietnamese": "male, 16 years old, higher tenor, slightly husky, confident and laid-back, teenage conversational style",
         },
     },
     "teen-f": {
@@ -404,6 +713,20 @@ VOICE_THEMES: dict[str, dict] = {
             "Portuguese": "Feminino, 16 anos, soprano, voz cristalina e brilhante, entusiasmada e extrovertida, estilo conversacional adolescente",
             "Spanish": "Femenino, 16 años, soprano, voz cristalina y brillante, entusiasta y extrovertida, estilo conversacional adolescente",
             "Italian": "Femminile, 16 anni, soprano, voce cristallina e brillante, entusiasta e socievole, stile conversazionale adolescenziale",
+            "Arabic": "female, 16 years old, soprano, crystal clear and bright, enthusiastic and outgoing, teenage conversational style",
+            "Cantonese": "female, 16 years old, soprano, crystal clear and bright, enthusiastic and outgoing, teenage conversational style",
+            "Czech": "female, 16 years old, soprano, crystal clear and bright, enthusiastic and outgoing, teenage conversational style",
+            "Dutch": "female, 16 years old, soprano, crystal clear and bright, enthusiastic and outgoing, teenage conversational style",
+            "Finnish": "female, 16 years old, soprano, crystal clear and bright, enthusiastic and outgoing, teenage conversational style",
+            "Greek": "female, 16 years old, soprano, crystal clear and bright, enthusiastic and outgoing, teenage conversational style",
+            "Hindi": "female, 16 years old, soprano, crystal clear and bright, enthusiastic and outgoing, teenage conversational style",
+            "Indonesian": "female, 16 years old, soprano, crystal clear and bright, enthusiastic and outgoing, teenage conversational style",
+            "Polish": "female, 16 years old, soprano, crystal clear and bright, enthusiastic and outgoing, teenage conversational style",
+            "Romanian": "female, 16 years old, soprano, crystal clear and bright, enthusiastic and outgoing, teenage conversational style",
+            "Thai": "female, 16 years old, soprano, crystal clear and bright, enthusiastic and outgoing, teenage conversational style",
+            "Turkish": "female, 16 years old, soprano, crystal clear and bright, enthusiastic and outgoing, teenage conversational style",
+            "Ukrainian": "female, 16 years old, soprano, crystal clear and bright, enthusiastic and outgoing, teenage conversational style",
+            "Vietnamese": "female, 16 years old, soprano, crystal clear and bright, enthusiastic and outgoing, teenage conversational style",
         },
     },
 }
@@ -414,6 +737,29 @@ def list_themes() -> list[dict]:
         {"name": name, "gender": t["gender"], "languages": sorted(t["instructs"])}
         for name, t in VOICE_THEMES.items()
     ]
+
+
+def get_theme_instruct(theme_name: str, language: str) -> str:
+    """Return the voice-design instruct string for a theme + language pair.
+
+    This is used by OmniVoice's built-in voice design mode, which accepts
+    an ``instruct`` string describing the desired voice attributes.
+
+    Raises:
+        ValueError: If *theme_name* or *language* is not found.
+    """
+    if theme_name not in VOICE_THEMES:
+        raise ValueError(
+            f"Unknown voice theme {theme_name!r}. "
+            f"Available: {', '.join(VOICE_THEMES)}"
+        )
+    theme = VOICE_THEMES[theme_name]
+    if language not in theme["instructs"]:
+        raise ValueError(
+            f"Language {language!r} not supported for theme {theme_name!r}. "
+            f"Available: {', '.join(sorted(theme['instructs']))}"
+        )
+    return theme["instructs"][language]
 
 
 def _theme_profile_name(theme_name: str, language: str, gender: str) -> str:

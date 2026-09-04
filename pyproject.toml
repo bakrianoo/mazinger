@@ -26,6 +26,7 @@ dependencies = [
 # Recommended for offline/local transcription with Chatterbox TTS.
 transcribe-faster = [
     "faster-whisper>=1.0",
+    "nvidia-cublas-cu12>=12.0; platform_system == 'Linux'",
 ]
 # Local transcription with WhisperX (uses transformers>=4.48)
 # NOT compatible with tts-chatterbox due to transformers conflict.
@@ -42,15 +43,40 @@ transcribe-whisperx = [
 transcribe-deepgram = [
     "deepgram-sdk>=6.0",
 ]
+# Local transcription with CohereX (Cohere Transcribe + wav2vec2 alignment).
+# 14 languages plus a dedicated Arabic model.  Requires transformers>=5.4,
+# which is compatible with the tts/tts-omnivoice extras but NOT with
+# tts-chatterbox.  The [langid] extra enables source-language auto-detection.
+# The Cohere ASR models are gated on HuggingFace — sign in from Mazinger
+# Studio, or set HF_TOKEN.  The pyannote VAD weights ship inside the package.
+transcribe-coherex = [
+    "coherex[langid]>=0.2.0",
+    "torch>=2.8",
+    "torchaudio>=2.8",
+]
 # Alias for convenience (points to faster-whisper)
 transcribe = [
     "mazinger[transcribe-faster]",
 ]
-# TTS with Qwen (compatible with transcribe-whisperx and transcribe-faster)
+# TTS with Qwen3-TTS (compatible with transcribe-whisperx and transcribe-faster)
+#
+# The engine is vendored at ``mazinger/_vendor/qwen_tts`` rather than pulled
+# from PyPI: the published ``qwen-tts`` 0.1.1 hard-pins transformers==4.57.3
+# and accelerate==1.12.0, which cannot coexist with coherex (>=5.4) or
+# omnivoice (>=5.3), and the pins are not relaxable from the outside.  Only
+# its runtime dependencies are declared here.  ``sox`` and ``onnxruntime``
+# are deliberately absent — they are needed only by the 25 Hz tokenizer,
+# which Mazinger never loads.  See mazinger/_vendor/qwen_tts/NOTICE.md.
 tts = [
-    "qwen-tts",
     "torch>=2.0",
+    "torchaudio>=2.0",
+    "transformers>=5.4",
+    "accelerate>=1.12",
+    "einops>=0.8",
+    "librosa>=0.10",
     "soundfile>=0.12",
+    "huggingface-hub>=0.30",
+    "numpy>=1.26",
 ]
 # TTS with Chatterbox
 # Use faster-whisper or OpenAI transcription (whisperx has conflicts).
@@ -72,6 +98,12 @@ flash-attn = [
 audio-enhance = [
     "demucs>=4.0.1",
 ]
+# TTS with OmniVoice — 24 languages, zero-shot voice cloning
+tts-omnivoice = [
+    "omnivoice",
+    "torch>=2.0",
+    "soundfile>=0.12",
+]
 # Full pipeline with Qwen TTS — same as bare install (kept as alias)
 all-qwen = [
     "mazinger[transcribe-faster,tts,audio-enhance]",
@@ -79,6 +111,35 @@ all-qwen = [
 # Full pipeline with Chatterbox TTS + faster-whisper (fully compatible)
 all-chatterbox = [
     "mazinger[transcribe-faster,tts-chatterbox,audio-enhance]",
+]
+# Full pipeline with OmniVoice TTS + faster-whisper
+all-omnivoice = [
+    "mazinger[transcribe-faster,tts-omnivoice,audio-enhance]",
+]
+# Retained as an alias — CohereX is part of [all] now, so this resolves to the
+# same set.  Kept so existing install commands and docs keep working.
+all-coherex = [
+    "mazinger[all]",
+]
+# Default recommended bundle — everything needed to run the full Mazinger
+# pipeline and the Studio web UI:
+#   • CohereX        (local GPU transcription, default — 14 languages plus a
+#                     dedicated Arabic model; the gated Cohere weights need a
+#                     Hugging Face sign-in the first time)
+#   • Faster Whisper (local GPU transcription, any language, no sign-in)
+#   • Deepgram Nova 3 (cloud transcription, no GPU required)
+#   • Qwen3-TTS  (voice-cloned synthesis with reference audio + transcript)
+#   • OmniVoice  (24 languages, zero-shot voice cloning)
+#   • Demucs     (background-audio separation for mixing)
+#   • Gradio     (Mazinger Studio web UI)
+# Compatible in a single environment.  Excludes Chatterbox and MLX (which
+# require dedicated environments — see docs/installation.md).
+#
+# CohereX brings the pyannote/lightning stack with it (~50 extra packages), so
+# [all] is a heavier install than it used to be; use the narrower extras above
+# if that matters — e.g. mazinger[transcribe-faster,tts,web].
+all = [
+    "mazinger[transcribe-coherex,transcribe-faster,transcribe-deepgram,tts,tts-omnivoice,audio-enhance,web]",
 ]
 # TTS with MLX Qwen3-TTS for Apple Silicon
 tts-mlx = [
@@ -94,12 +155,24 @@ transcribe-mlx = [
 all-mlx = [
     "mazinger[transcribe-faster,transcribe-mlx,tts-mlx]",
 ]
+# Gradio web UI
+web = [
+    "gradio>=4.0",
+    # Powers the Studio's "Sign in with Hugging Face" button.  Older releases
+    # lack the device-code flow; the UI falls back to a token box there.
+    "huggingface-hub>=0.30",
+]
 
 [project.scripts]
 mazinger = "mazinger.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
+include = ["mazinger*"]       # keep `tests` out of the installed distribution
+
+# The vendored Qwen3-TTS fork ships one binary asset.
+[tool.setuptools.package-data]
+"mazinger._vendor.qwen_tts" = ["**/*.npz", "LICENSE", "NOTICE.md"]
 
 # UV-specific overrides for Python 3.12+ / Colab CUDA compatibility
 # chatterbox-tts 0.1.6 hard-pins torch==2.6.0, torchaudio==2.6.0, numpy<1.26,
@@ -107,13 +180,20 @@ where = ["."]
 # cause a multi-GB downgrade that breaks the environment.
 # These overrides tell uv: "accept anything >= these floors" so the already-
 # installed CUDA-optimised builds are reused instead of being replaced.
+#
+# The transformers/accelerate overrides that used to live here existed solely
+# to relax qwen-tts 0.1.1's transformers==4.57.3 and accelerate==1.12.0 pins.
+# That package is no longer installed — it is vendored under
+# mazinger/_vendor/qwen_tts — so nothing pins those any more and the
+# overrides were dropped.  coherex (>=5.4) and omnivoice (>=5.3) declare
+# ordinary floors, which the resolver satisfies on its own.
 [tool.uv]
 override-dependencies = [
-    "numpy>=1.26",         # chatterbox pins numpy<1.26; conflicts with Python 3.12+
-    "pandas>=2.2",         # chatterbox pins old pandas; not needed for inference
-    "torch>=2.0",          # chatterbox pins torch==2.6.0; allow system CUDA build
-    "torchaudio>=2.0",     # chatterbox pins torchaudio==2.6.0; allow system CUDA build
-    "safetensors>=0.3",    # chatterbox pins safetensors==0.5.3; 0.7+ is backward-compat
+    "numpy>=1.26",            # chatterbox pins numpy<1.26; conflicts with Python 3.12+
+    "pandas>=2.2",            # chatterbox pins old pandas; not needed for inference
+    "torch>=2.0",             # chatterbox pins torch==2.6.0; allow system CUDA build
+    "torchaudio>=2.0",        # chatterbox pins torchaudio==2.6.0; allow system CUDA build
+    "safetensors>=0.3",       # chatterbox pins safetensors==0.5.3; 0.7+ is backward-compat
 ]
 
 # Build dependencies for packages with missing build requirements

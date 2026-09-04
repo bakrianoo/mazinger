@@ -31,8 +31,9 @@ def _remove_from_cache(obj: Any) -> None:
 #  TTS Engine Type
 # ═══════════════════════════════════════════════════════════════════════════════
 
-TTSEngine = Literal["qwen", "chatterbox", "mlx"]
+TTSEngine = Literal["qwen", "chatterbox", "mlx", "omnivoice"]
 DEFAULT_MLX_MODEL = "mlx-community/Qwen3-TTS-12Hz-0.6B-Base-bf16"
+DEFAULT_OMNIVOICE_MODEL = "k2-fsa/OmniVoice"
 
 SUPPORTED_LANGUAGES = (
     "Chinese", "English", "Japanese", "Korean",
@@ -103,7 +104,11 @@ def _load_qwen_model(
 ) -> Any:
     """Load a Qwen3-TTS model and return it."""
     import torch
-    from qwen_tts import Qwen3TTSModel
+
+    # Vendored fork of qwen-tts 0.1.1 — the PyPI release pins
+    # transformers==4.57.3, which cannot coexist with the rest of the
+    # environment.  See mazinger/_vendor/qwen_tts/NOTICE.md.
+    from mazinger._vendor.qwen_tts import Qwen3TTSModel
 
     dtype_map = {
         "bfloat16": torch.bfloat16,
@@ -339,6 +344,264 @@ class _MLXTTSWrapper(TTSWrapper):
         log.info("MLX TTS model unloaded, GPU memory freed.")
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+#  OmniVoice Backend
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_OMNIVOICE_SAMPLE_RATE = 24_000
+
+# Maximum length of the audio reference passed back to OmniVoice when
+# locking the auto/design voice after the first segment.  OmniVoice
+# warns above 20 s and recommends 3–10 s; longer references OOM on
+# 16 GB GPUs (e.g. Colab T4) and degrade clone quality.
+_OMNIVOICE_LOCK_REF_SECONDS = 8.0
+
+
+def _load_omnivoice_model(
+    model_name: str = DEFAULT_OMNIVOICE_MODEL,
+    device: str = "cuda:0",
+    dtype: str = "float16",
+) -> Any:
+    """Load an OmniVoice model and return it."""
+    import torch
+    try:
+        from omnivoice import OmniVoice
+    except ImportError:
+        raise ImportError(
+            "omnivoice not installed. Install with: pip install 'mazinger[tts-omnivoice]'\n"
+            "Or use engine='qwen' for Qwen3-TTS."
+        ) from None
+
+    dtype_map = {
+        "bfloat16": torch.bfloat16,
+        "float16": torch.float16,
+        "float32": torch.float32,
+    }
+    torch_dtype = dtype_map.get(dtype, torch.float16)
+
+    _is_cpu = "cpu" in str(device)
+    if torch_dtype == torch.bfloat16 and (
+        _is_cpu or not torch.cuda.is_bf16_supported()
+    ):
+        log.warning(
+            "bfloat16 not supported on %s — falling back to float16", device,
+        )
+        torch_dtype = torch.float16
+        dtype = "float16"
+    elif torch_dtype == torch.float16 and _is_cpu:
+        log.warning(
+            "float16 not efficient on CPU — falling back to float32",
+        )
+        torch_dtype = torch.float32
+        dtype = "float32"
+
+    model = OmniVoice.from_pretrained(
+        model_name, device_map=device, dtype=torch_dtype,
+    )
+    log.info("Loaded OmniVoice model: %s on %s (%s)", model_name, device, dtype)
+    return model
+
+
+class _OmniVoiceTTSWrapper(TTSWrapper):
+    """OmniVoice in voice-clone mode — clones the speaker from ``ref_audio``.
+
+    The reference audio is encoded into a reusable
+    :class:`VoiceClonePrompt` once on construction; every segment then
+    shares the *exact* same prompt, guaranteeing voice consistency and
+    avoiding the cost of re-encoding the reference for each call.
+    """
+
+    engine = "omnivoice"
+
+    def __init__(self, model: Any, ref_audio: str, ref_text: str | None = None):
+        self.model = model
+        self.ref_audio = ref_audio
+        self.ref_text = ref_text
+        # Build the prompt eagerly so the same encoded reference is shared
+        # across all segments.
+        self._voice_clone_prompt = model.create_voice_clone_prompt(
+            ref_audio=ref_audio, ref_text=ref_text,
+        )
+
+    def synthesize(self, text: str, language: str = "English") -> tuple[np.ndarray, int]:
+        audio_list = self.model.generate(
+            text=text, voice_clone_prompt=self._voice_clone_prompt,
+        )
+        if not audio_list:
+            raise RuntimeError(
+                f"OmniVoice generate() returned no results "
+                f"(text={text!r}, ref_audio={self.ref_audio!r})"
+            )
+        return audio_list[0], _OMNIVOICE_SAMPLE_RATE
+
+    def unload(self) -> None:
+        import torch
+        _remove_from_cache(self.model)
+        del self.model
+        gc.collect()
+        torch.cuda.empty_cache()
+        log.info("OmniVoice model unloaded, GPU memory freed.")
+
+
+def _omnivoice_build_clone_prompt(
+    model: Any, audio: np.ndarray, ref_text: str,
+) -> Any:
+    """Build a reusable :class:`VoiceClonePrompt` from a generated waveform.
+
+    Used by the auto-voice and voice-design wrappers to *lock* the voice
+    after the first segment so every subsequent segment is cloned from the
+    exact same speaker.
+
+    The reference is trimmed to at most ``_OMNIVOICE_LOCK_REF_SECONDS`` of
+    audio.  OmniVoice itself warns that references longer than ~20 s
+    cause OOMs and degrade clone quality, and the model documentation
+    recommends 3–10 s — anything longer here only hurts.  Trimming the
+    *lock reference* does **not** affect the generated segment audio
+    returned to the caller; only the encoded prompt used to clone
+    subsequent segments is shortened.
+
+    When the audio is trimmed, the paired ``ref_text`` is also shortened
+    proportionally so the prompt's audio↔text alignment stays
+    reasonable.
+    """
+    import torch
+    max_samples = int(_OMNIVOICE_LOCK_REF_SECONDS * _OMNIVOICE_SAMPLE_RATE)
+    if audio.shape[-1] > max_samples:
+        ratio = max_samples / audio.shape[-1]
+        audio = audio[..., :max_samples]
+        words = ref_text.split()
+        if words:
+            keep = max(1, int(len(words) * ratio))
+            ref_text = " ".join(words[:keep])
+    waveform = torch.from_numpy(np.ascontiguousarray(audio))
+    return model.create_voice_clone_prompt(
+        ref_audio=(waveform, _OMNIVOICE_SAMPLE_RATE),
+        ref_text=ref_text,
+    )
+
+
+class _OmniVoiceAutoTTSWrapper(TTSWrapper):
+    """OmniVoice in auto-voice mode — the model picks a voice automatically.
+
+    The model would otherwise sample a different random voice on every
+    :meth:`synthesize` call.  To keep all segments in a single voice we
+    let the model pick once on the first call, then build a reusable
+    voice-clone prompt from that output and use it for every subsequent
+    segment.
+    """
+
+    engine = "omnivoice"
+
+    def __init__(self, model: Any):
+        self.model = model
+        self._voice_clone_prompt: Any = None
+
+    def synthesize(self, text: str, language: str = "English") -> tuple[np.ndarray, int]:
+        if self._voice_clone_prompt is not None:
+            audio_list = self.model.generate(
+                text=text, voice_clone_prompt=self._voice_clone_prompt,
+            )
+        else:
+            log.info(
+                "OmniVoice auto-voice: generating first segment to lock the voice"
+            )
+            audio_list = self.model.generate(text=text)
+
+        if not audio_list:
+            raise RuntimeError(
+                f"OmniVoice auto-voice generate() returned no results "
+                f"(text={text!r})"
+            )
+
+        audio = audio_list[0]
+        if self._voice_clone_prompt is None:
+            try:
+                self._voice_clone_prompt = _omnivoice_build_clone_prompt(
+                    self.model, audio, text,
+                )
+                log.info(
+                    "OmniVoice auto-voice: voice locked — subsequent segments "
+                    "will be cloned from segment 1"
+                )
+            except Exception as exc:  # noqa: BLE001
+                log.warning(
+                    "Failed to lock OmniVoice auto-voice (%s) — segments may "
+                    "use different voices", exc,
+                )
+        return audio, _OMNIVOICE_SAMPLE_RATE
+
+    def unload(self) -> None:
+        import torch
+        _remove_from_cache(self.model)
+        self._voice_clone_prompt = None
+        del self.model
+        gc.collect()
+        torch.cuda.empty_cache()
+        log.info("OmniVoice model unloaded, GPU memory freed.")
+
+
+class _OmniVoiceDesignTTSWrapper(TTSWrapper):
+    """OmniVoice voice-design mode — voice controlled via instruct string.
+
+    The ``instruct`` text only describes voice *characteristics* (gender,
+    pitch, accent, …); the model still samples a fresh random voice
+    matching that description on every :meth:`generate` call.  To keep
+    all segments in a single voice we generate the first segment with
+    the instruct, then lock the voice by building a reusable
+    voice-clone prompt from that output and use it for every subsequent
+    segment.
+    """
+
+    engine = "omnivoice"
+
+    def __init__(self, model: Any, instruct: str):
+        self.model = model
+        self.instruct = instruct
+        self._voice_clone_prompt: Any = None
+
+    def synthesize(self, text: str, language: str = "English") -> tuple[np.ndarray, int]:
+        if self._voice_clone_prompt is not None:
+            audio_list = self.model.generate(
+                text=text, voice_clone_prompt=self._voice_clone_prompt,
+            )
+        else:
+            log.info(
+                "OmniVoice voice-design: generating first segment with "
+                "instruct=%r to lock the voice", self.instruct,
+            )
+            audio_list = self.model.generate(text=text, instruct=self.instruct)
+
+        if not audio_list:
+            raise RuntimeError(
+                f"OmniVoice voice-design generate() returned no results "
+                f"(text={text!r}, instruct={self.instruct!r})"
+            )
+
+        audio = audio_list[0]
+        if self._voice_clone_prompt is None:
+            try:
+                self._voice_clone_prompt = _omnivoice_build_clone_prompt(
+                    self.model, audio, text,
+                )
+                log.info(
+                    "OmniVoice voice-design: voice locked — subsequent "
+                    "segments will be cloned from segment 1"
+                )
+            except Exception as exc:  # noqa: BLE001
+                log.warning(
+                    "Failed to lock OmniVoice voice-design voice (%s) — "
+                    "segments may use different voices", exc,
+                )
+        return audio, _OMNIVOICE_SAMPLE_RATE
+
+    def unload(self) -> None:
+        import torch
+        _remove_from_cache(self.model)
+        self._voice_clone_prompt = None
+        del self.model
+        gc.collect()
+        torch.cuda.empty_cache()
+        log.info("OmniVoice model unloaded, GPU memory freed.")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -352,15 +615,17 @@ def load_model(
     engine: TTSEngine = "qwen",
     chatterbox_model: str = "ResembleAI/chatterbox",
     mlx_model: str = DEFAULT_MLX_MODEL,
+    omnivoice_model: str = DEFAULT_OMNIVOICE_MODEL,
 ) -> Any:
     """Load a TTS model and return it.
 
     Parameters:
         model_name:        HuggingFace model identifier (used for Qwen).
         device:            Target device (e.g. ``cuda:0``).
-        dtype:             Weight dtype for Qwen (``bfloat16``, ``float16``, ``float32``).
-        engine:            TTS engine: ``qwen`` or ``chatterbox``.
+        dtype:             Weight dtype (``bfloat16``, ``float16``, ``float32``).
+        engine:            TTS engine: ``qwen``, ``chatterbox``, ``mlx``, or ``omnivoice``.
         chatterbox_model:  HuggingFace model identifier for Chatterbox.
+        omnivoice_model:   HuggingFace model identifier for OmniVoice.
 
     Returns:
         The loaded model instance.
@@ -369,6 +634,8 @@ def load_model(
         name = chatterbox_model
     elif engine == "mlx":
         name = mlx_model
+    elif engine == "omnivoice":
+        name = omnivoice_model
     else:
         name = model_name
     key = _cache_key(engine, name, device, dtype)
@@ -382,6 +649,8 @@ def load_model(
         model = _load_chatterbox_model(device, chatterbox_model)
     elif engine == "mlx":
         model = _load_mlx_model(mlx_model)
+    elif engine == "omnivoice":
+        model = _load_omnivoice_model(omnivoice_model, device, dtype)
     else:
         raise ValueError(f"Unknown TTS engine: {engine!r}")
 
@@ -397,6 +666,8 @@ def create_voice_prompt(
     chatterbox_exaggeration: float = 0.5,
     chatterbox_cfg: float = 0.5,
     mlx_model: str = DEFAULT_MLX_MODEL,
+    omnivoice_model: str = DEFAULT_OMNIVOICE_MODEL,
+    voice_design_instruct: str | None = None,
 ) -> TTSWrapper:
     """Build a reusable voice-clone prompt from a reference recording.
 
@@ -405,10 +676,14 @@ def create_voice_prompt(
         ref_audio: Path to the reference audio file.
         ref_text:  Transcript of the reference audio.  When ``None``,
                    Qwen uses x-vector-only mode (no transcript needed).
-                   Ignored for Chatterbox.
-        engine:    TTS engine: ``qwen`` or ``chatterbox``.
+                   Ignored for Chatterbox and OmniVoice.
+        engine:    TTS engine: ``qwen``, ``chatterbox``, ``mlx``, or ``omnivoice``.
         chatterbox_exaggeration: Exaggeration level for Chatterbox (0.0-1.0).
         chatterbox_cfg:          CFG weight for Chatterbox (0.0-1.0).
+        voice_design_instruct:   OmniVoice voice-design instruct string
+                   (e.g. ``"female, low pitch, british accent"``).  When
+                   provided with ``engine="omnivoice"``, uses OmniVoice's
+                   built-in voice design instead of cloning from *ref_audio*.
 
     Returns:
         A :class:`TTSWrapper` instance ready for synthesis.
@@ -424,6 +699,16 @@ def create_voice_prompt(
     elif engine == "mlx":
         log.info("MLX Qwen3-TTS voice clone configured from %s", ref_audio)
         return _MLXTTSWrapper(model, ref_audio, ref_text)
+    elif engine == "omnivoice":
+        if voice_design_instruct:
+            log.info("OmniVoice voice-design mode (instruct=%r)", voice_design_instruct)
+            return _OmniVoiceDesignTTSWrapper(model, voice_design_instruct)
+        elif ref_audio:
+            log.info("OmniVoice voice clone configured from %s", ref_audio)
+            return _OmniVoiceTTSWrapper(model, ref_audio, ref_text)
+        else:
+            log.info("OmniVoice auto-voice mode (no reference audio)")
+            return _OmniVoiceAutoTTSWrapper(model)
     else:
         raise ValueError(f"Unknown TTS engine: {engine!r}")
 

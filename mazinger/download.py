@@ -172,6 +172,35 @@ def _yt_dlp_auth_opts(
     return opts
 
 
+# Substrings that indicate yt-dlp is asking the caller to supply cookies.
+# Matched case-insensitively against the rendered exception message.
+_COOKIE_REQUIRED_PATTERNS: tuple[str, ...] = (
+    "sign in to confirm you",          # "Sign in to confirm you're not a bot"
+    "sign in to confirm your age",     # age-gated content
+    "confirm you're not a bot",
+    "use --cookies",                   # yt-dlp's own hint
+    "use --cookies-from-browser",
+    "--cookies-from-browser",
+    "cookies are no longer valid",
+    "login required",
+    "private video",
+    "members-only",
+    "this video is available to this channel",
+    "video is only available for registered users",
+    "http error 403",                  # often returned when YT blocks anonymous
+)
+
+
+def is_cookies_required_error(exc: BaseException | str) -> bool:
+    """Return ``True`` if *exc* looks like yt-dlp asking for cookies.
+
+    Accepts either the exception itself or its rendered string so callers
+    can probe nested ``DownloadError`` chains without losing context.
+    """
+    text = str(exc).lower()
+    return any(pat in text for pat in _COOKIE_REQUIRED_PATTERNS)
+
+
 def _yt_dlp_common_opts() -> dict[str, Any]:
     """Return yt-dlp options that keep behavior predictable across environments."""
     return {

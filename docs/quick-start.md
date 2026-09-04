@@ -167,6 +167,9 @@ mazinger transcribe audio.mp3 -o subs.srt --method faster-whisper --device cuda
 # Local with WhisperX (requires transcribe-whisperx extra)
 mazinger transcribe audio.mp3 -o subs.srt --method whisperx --device cuda
 
+# Local with CohereX (in mazinger[all]; needs HF_TOKEN for the gated models)
+mazinger transcribe audio.mp3 -o subs.srt --method coherex --language ar
+
 # MLX Whisper (Apple Silicon, requires transcribe-mlx extra)
 mazinger transcribe audio.mp3 -o subs.srt --method mlx-whisper
 ```
@@ -284,6 +287,24 @@ mazinger speak --srt translated.srt --original-audio audio.mp3 \
     -o dubbed.wav
 ```
 
+## Use OmniVoice
+
+Add `--tts-engine omnivoice` to use OmniVoice, which supports 24 languages with zero-shot voice cloning:
+
+```bash
+mazinger dub "https://youtube.com/watch?v=VIDEO_ID" \
+    --clone-profile abubakr \
+    --tts-engine omnivoice \
+    --target-language Hindi
+
+mazinger speak --srt translated.srt --original-audio audio.mp3 \
+    --voice-sample speaker.m4a \
+    --tts-engine omnivoice \
+    -o dubbed.wav
+```
+
+OmniVoice accepts an optional voice transcript (`--voice-script`) but does not require one.
+
 ## Use MLX (Apple Silicon)
 
 Add `--tts-engine mlx` to use MLX-accelerated TTS (requires Apple Silicon):
@@ -317,10 +338,10 @@ mazinger speak --srt translated.srt --original-audio audio.mp3 \
     --fixed-tempo 1.1 \
     -o dubbed.wav
 
-# Dynamic: per-segment speed to match original timing, max 1.3×
+# Per-segment speed matching is the default; cap the speed-up at 1.3×
 mazinger speak --srt translated.srt --original-audio audio.mp3 \
     --clone-profile abubakr \
-    --dynamic-tempo --max-tempo 1.3 \
+    --max-tempo 1.3 \
     -o dubbed.wav
 ```
 

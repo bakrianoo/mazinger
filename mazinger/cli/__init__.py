@@ -24,6 +24,7 @@ from mazinger.cli import (
     _thumbnails,
     _transcribe,
     _translate,
+    _web,
 )
 
 _COMMANDS = (
@@ -38,6 +39,7 @@ _COMMANDS = (
     _speak,
     _subtitle,
     _profile,
+    _web,
 )
 
 

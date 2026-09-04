@@ -3,11 +3,16 @@
 import gradio as gr
 
 from constants import (
-    LANGUAGES, VOICE_PRESETS, METHOD_MAP, OLLAMA_DEFAULT_MODEL,
+    LANGUAGES, QWEN_LANGUAGES, OMNIVOICE_LANGUAGES,
+    VOICE_PRESETS, METHOD_MAP, DEFAULT_TRANSCRIBE_LABEL, OLLAMA_DEFAULT_MODEL,
     SEGMENT_MODE_MAP, THEME_CHOICES, VOICE_THEMES,
 )
 from theme import theme, CSS
-from helpers import free_gpu_and_restart_ollama
+from helpers import (
+    free_gpu_and_restart_ollama,
+    hf_login_flow, hf_login_with_token, hf_logout, hf_status,
+    HF_MODEL_LINKS_INLINE,
+)
 from pipeline import run_dubbing, render_video
 
 
@@ -25,6 +30,39 @@ with gr.Blocks(theme=theme, title="Mazinger Studio", css=CSS) as app:
     )
 
     # ── LLM Provider ──────────────────────────────────────────────
+    # ── HuggingFace Account ───────────────────────────────────────
+    gr.Markdown("#### 🤗  HUGGING FACE", elem_classes="section-title")
+    with gr.Accordion("Sign in to download gated models", open=False):
+        gr.Markdown(
+            "Some models — the **Cohere Transcribe** backends used by CohereX — "
+            "are gated and only download once your account is authorised. "
+            "Sign in here, then accept the terms on each model page.",
+            elem_classes="openai-info",
+        )
+        with gr.Row():
+            hf_login_btn = gr.Button("🤗  Sign in with Hugging Face", variant="primary")
+            hf_logout_btn = gr.Button("Sign out", variant="secondary")
+        hf_status_md = gr.Markdown(hf_status())
+        gr.Markdown(HF_MODEL_LINKS_INLINE, elem_classes="hf-model-links")
+
+        with gr.Accordion("Use an access token instead", open=False):
+            gr.Markdown(
+                "Prefer to paste a token? Create one at "
+                "[huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) "
+                "(a **read** token is enough).",
+                elem_classes="openai-info",
+            )
+            hf_token_box = gr.Textbox(
+                label="Access token",
+                placeholder="hf_…",
+                type="password",
+            )
+            hf_token_btn = gr.Button("Use this token")
+
+    hf_login_btn.click(hf_login_flow, None, hf_status_md)
+    hf_logout_btn.click(hf_logout, None, hf_status_md)
+    hf_token_btn.click(hf_login_with_token, hf_token_box, hf_status_md)
+
     gr.Markdown("#### 🤖  LLM PROVIDER", elem_classes="section-title")
     with gr.Group(elem_classes="card-highlight"):
         llm_provider = gr.Radio(
@@ -292,7 +330,7 @@ with gr.Blocks(theme=theme, title="Mazinger Studio", css=CSS) as app:
 
             with gr.Tab("🗣️ TTS"):
                 tts_engine = gr.Dropdown(
-                    ["Qwen3-TTS"],
+                    ["Qwen3-TTS", "OmniVoice"],
                     value="Qwen3-TTS",
                     label="TTS engine",
                 )
@@ -352,9 +390,9 @@ with gr.Blocks(theme=theme, title="Mazinger Studio", css=CSS) as app:
             with gr.Tab("📝 Transcription"):
                 transcribe_method = gr.Dropdown(
                     list(METHOD_MAP.keys()),
-                    value="Faster Whisper (local GPU)",
+                    value=DEFAULT_TRANSCRIBE_LABEL,
                     label="Transcription method",
-                    info="Cloud = needs OpenAI key  •  Local = faster, requires GPU",
+                    info="CohereX = local GPU (default), 14 languages incl. a dedicated Arabic model — needs Hugging Face sign-in  •  Faster Whisper = local GPU, any language, no sign-in  •  Cloud options need an API key",
                 )
                 whisper_model = gr.Textbox(
                     label="Model override",
@@ -502,6 +540,21 @@ with gr.Blocks(theme=theme, title="Mazinger Studio", css=CSS) as app:
     llm_provider.change(
         _on_llm_provider_change, llm_provider,
         [ollama_group, openai_group],
+    )
+
+    # ── TTS engine → language list ────────────────────────────────
+    _engine_languages = {
+        "Qwen3-TTS": QWEN_LANGUAGES,
+        "OmniVoice": OMNIVOICE_LANGUAGES,
+    }
+
+    def _on_tts_engine_change(engine):
+        langs = _engine_languages.get(engine, LANGUAGES)
+        return gr.update(choices=langs, value=langs[0] if langs else "English")
+
+    tts_engine.change(
+        _on_tts_engine_change, tts_engine,
+        [target_language],
     )
 
     # ── Wire everything ───────────────────────────────────────────
