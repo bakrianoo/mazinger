@@ -9,6 +9,7 @@
 | `OPENAI_MODEL` | `gpt-4.1` | Default LLM model for translation, description, etc. |
 | `HF_TOKEN` | — | HuggingFace token for accessing private voice profile datasets |
 | `MAZINGER_PROFILES_REPO_URL` | — | Custom HuggingFace dataset URL for voice profiles |
+| `MAZINGER_YTDLP_PLAYER_CLIENT` | — | Override the YouTube player clients yt-dlp uses (see below) |
 
 CLI flags take precedence over environment variables. If neither is set, `OPENAI_MODEL` defaults to `gpt-4.1`.
 
@@ -25,6 +26,50 @@ mazinger dub "https://youtube.com/watch?v=VIDEO_ID" \
     --clone-profile abubakr \
     --openai-api-key "sk-..."
 ```
+
+## YouTube Download Failures
+
+YouTube regularly breaks the internal "player clients" yt-dlp uses to fetch a
+video. When that happens the download stage fails before it lists a single
+format, with an error like:
+
+```
+ERROR: [youtube] VIDEO_ID: The page needs to be reloaded.
+ERROR: [youtube] VIDEO_ID: no video formats found
+```
+
+Mazinger works around this by asking yt-dlp for a known-good set of clients
+(`web_safari`, `web_embedded`, `visionos`) and excluding `tv_downgraded`, which
+is the one that returns the "reloaded" error. If that set fails, it
+automatically retries once with yt-dlp's own defaults, so a future yt-dlp
+release that fixes the problem upstream still wins.
+
+If YouTube changes again before Mazinger does, override the client list without
+waiting for a new release:
+
+```bash
+# Try a different set of clients
+export MAZINGER_YTDLP_PLAYER_CLIENT="tv,mweb"
+
+# Or hand control back to yt-dlp entirely
+export MAZINGER_YTDLP_PLAYER_CLIENT="default"
+```
+
+The value is a comma-separated list matching yt-dlp's
+`--extractor-args "youtube:player_client=..."`; prefix a client with `-` to
+exclude it. Setting this replaces the whole ladder — one attempt, no fallback.
+
+**Before reaching for this, upgrade yt-dlp** — it is usually the real fix:
+
+```bash
+uv pip install --upgrade yt-dlp
+```
+
+If the error instead mentions signing in or a bot check, it is an
+authentication problem rather than a client problem — see
+[YouTube Cookies](youtube-cookies.md).
+
+---
 
 ## Using a Custom LLM Provider
 

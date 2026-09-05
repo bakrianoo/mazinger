@@ -4,13 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mazinger"
-version = "2.0.1"
+version = "2.1.1"
 description = "End-to-end video dubbing pipeline: transcribe, translate, and voice-clone."
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.10"
 dependencies = [
-    "yt-dlp>=2024.0",
+    # YouTube breaks older extractors constantly; anything from the 2024
+    # line can no longer resolve formats at all.  Keep this floor recent.
+    "yt-dlp>=2026.3.17",
     "openai>=1.0",
     "json-repair>=0.28",
     "Pillow>=10.0",

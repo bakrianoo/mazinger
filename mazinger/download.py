@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -201,9 +202,82 @@ def is_cookies_required_error(exc: BaseException | str) -> bool:
     return any(pat in text for pat in _COOKIE_REQUIRED_PATTERNS)
 
 
-def _yt_dlp_common_opts() -> dict[str, Any]:
+# ── YouTube player-client selection ──────────────────────────────────────
+#
+# YouTube periodically breaks the InnerTube clients yt-dlp reaches for by
+# default.  The symptom is an extraction that dies before a single format is
+# listed, with "The page needs to be reloaded" or "no video formats found".
+# Naming the clients explicitly works around it: ``web_safari`` and
+# ``web_embedded`` are the currently reliable pair, and ``tv_downgraded`` is
+# excluded because it is the client that returns the "reloaded" error.
+#
+# ``visionos`` is appended as a safety net: it is the only client that needs no
+# JavaScript runtime, so it keeps extraction working on boxes without Node.
+# yt-dlp drops it automatically (with a one-time warning) when cookies are in
+# play, since it does not support them -- leaving exactly the pair above.
+#
+# Each entry is one attempt, tried in order.  The empty tuple means "leave
+# yt-dlp's own defaults alone", so a future yt-dlp release that fixes this
+# upstream still gets its shot if the pin above goes stale.
+_YT_PLAYER_CLIENT_ATTEMPTS: tuple[tuple[str, ...], ...] = (
+    ("web_safari", "web_embedded", "visionos", "-tv_downgraded"),
+    (),
+)
+
+#: Comma-separated override for the client list, e.g. ``tv,mweb``.  Set it to
+#: ``default`` to hand control back to yt-dlp entirely.  A value here replaces
+#: the whole ladder above — one attempt, no fallback.
+PLAYER_CLIENT_ENV = "MAZINGER_YTDLP_PLAYER_CLIENT"
+
+# Extraction failures that a different player client can plausibly fix.
+_PLAYER_CLIENT_ERROR_PATTERNS: tuple[str, ...] = (
+    "the page needs to be reloaded",
+    "no video formats found",
+    "unable to extract player response",
+    "failed to extract any player response",
+    "player response",
+    "this content isn't available",
+    # Every client returned something, but nothing usable -- the format
+    # strings built here always end in a bare "best" fallback, so this means
+    # the clients came back empty rather than that the selector was wrong.
+    "requested format is not available",
+    "no player clients have been requested",
+)
+
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _describe_clients(clients: tuple[str, ...]) -> str:
+    return ",".join(clients) if clients else "yt-dlp defaults"
+
+
+def is_player_client_error(exc: BaseException | str) -> bool:
+    """Return ``True`` when *exc* looks fixable by trying another player client.
+
+    Errors that ask for cookies are deliberately excluded — no amount of
+    client-switching substitutes for authentication, and the caller has a
+    dedicated recovery path for those (:func:`is_cookies_required_error`).
+    """
+    if is_cookies_required_error(exc):
+        return False
+    text = str(exc).lower()
+    return any(pat in text for pat in _PLAYER_CLIENT_ERROR_PATTERNS)
+
+
+def _player_client_attempts() -> tuple[tuple[str, ...], ...]:
+    """Client sets to try, honoring the ``MAZINGER_YTDLP_PLAYER_CLIENT`` override."""
+    override = os.environ.get(PLAYER_CLIENT_ENV, "").strip()
+    if not override:
+        return _YT_PLAYER_CLIENT_ATTEMPTS
+    clients = tuple(part.strip() for part in override.split(",") if part.strip())
+    return (clients,) if clients else ((),)
+
+
+def _yt_dlp_common_opts(
+    player_clients: tuple[str, ...] = _YT_PLAYER_CLIENT_ATTEMPTS[0],
+) -> dict[str, Any]:
     """Return yt-dlp options that keep behavior predictable across environments."""
-    return {
+    opts: dict[str, Any] = {
         # Avoid picking up a user's global yt-dlp config that may force
         # custom formats and break metadata-only calls.
         "ignoreconfig": True,
@@ -212,6 +286,36 @@ def _yt_dlp_common_opts() -> dict[str, Any]:
         "js_runtimes": {"node": {}},
         "remote_components": ["ejs:github"],
     }
+    if player_clients:
+        # Equivalent to --extractor-args "youtube:player_client=a,b,-c".
+        opts["extractor_args"] = {"youtube": {"player_client": list(player_clients)}}
+    return opts
+
+
+def _run_with_player_fallback(build_opts, call, *, what: str):
+    """Run a yt-dlp *call*, retrying with the next player-client set on failure.
+
+    *build_opts* maps a client tuple to a full yt-dlp options dict; *call*
+    receives that dict and performs the actual extraction or download.  Errors
+    that another client cannot fix (missing cookies, a dead URL) propagate on
+    the first attempt rather than being retried pointlessly.
+    """
+    attempts = _player_client_attempts()
+    for index, clients in enumerate(attempts):
+        try:
+            return call(build_opts(clients))
+        except Exception as exc:
+            is_last = index == len(attempts) - 1
+            if is_last or not is_player_client_error(exc):
+                raise
+            log.warning(
+                "%s failed with player_client=%s (%s) — retrying with %s",
+                what,
+                _describe_clients(clients),
+                _ANSI_RE.sub("", str(exc)).strip().splitlines()[-1],
+                _describe_clients(attempts[index + 1]),
+            )
+    raise AssertionError("unreachable")  # pragma: no cover
 
 
 def resolve_slug(
@@ -227,18 +331,25 @@ def resolve_slug(
         dictionary returned by yt-dlp.
     """
     url = _strip_playlist_params(url)
-    opts = {
-        "skip_download": True,
-        "quiet": True,
-        **_yt_dlp_common_opts(),
-        **_yt_dlp_auth_opts(
-            cookies_from_browser=cookies_from_browser,
-            cookies=cookies,
-        ),
-    }
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        # ``process=False`` avoids format selection during metadata lookup.
-        info = ydl.extract_info(url, download=False, process=False)
+    auth = _yt_dlp_auth_opts(
+        cookies_from_browser=cookies_from_browser,
+        cookies=cookies,
+    )
+
+    def _build(clients: tuple[str, ...]) -> dict[str, Any]:
+        return {
+            "skip_download": True,
+            "quiet": True,
+            **_yt_dlp_common_opts(clients),
+            **auth,
+        }
+
+    def _extract(opts: dict[str, Any]) -> dict:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            # ``process=False`` avoids format selection during metadata lookup.
+            return ydl.extract_info(url, download=False, process=False)
+
+    info = _run_with_player_fallback(_build, _extract, what="Metadata lookup")
     title = info.get("title") or info.get("id") or "video"
     slug = sanitize_filename(title)
     log.info("Resolved slug: %s", slug)
@@ -463,18 +574,25 @@ def download_video(
 
     url = _strip_playlist_params(url)
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
-    opts = {
-        "format": fmt,
-        "merge_output_format": "mp4",
-        "outtmpl": output_path,
-        **_yt_dlp_common_opts(),
-        **_yt_dlp_auth_opts(
-            cookies_from_browser=cookies_from_browser,
-            cookies=cookies,
-        ),
-    }
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        ydl.download([url])
+    auth = _yt_dlp_auth_opts(
+        cookies_from_browser=cookies_from_browser,
+        cookies=cookies,
+    )
+
+    def _build(clients: tuple[str, ...]) -> dict[str, Any]:
+        return {
+            "format": fmt,
+            "merge_output_format": "mp4",
+            "outtmpl": output_path,
+            **_yt_dlp_common_opts(clients),
+            **auth,
+        }
+
+    def _download(opts: dict[str, Any]) -> None:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            ydl.download([url])
+
+    _run_with_player_fallback(_build, _download, what="Video download")
 
     # -- Warn when actual resolution differs from requested ---------------
     if max_height is not None:
