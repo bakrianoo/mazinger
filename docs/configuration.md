@@ -29,29 +29,69 @@ mazinger dub "https://youtube.com/watch?v=VIDEO_ID" \
 
 ## YouTube Download Failures
 
-YouTube regularly breaks the internal "player clients" yt-dlp uses to fetch a
-video. When that happens the download stage fails before it lists a single
-format, with an error like:
+YouTube serves video formats through internal "player clients", and which of
+them work depends on the network your request comes from. When none of them
+work, the download stage fails before listing a single format:
 
 ```
 ERROR: [youtube] VIDEO_ID: The page needs to be reloaded.
+ERROR: [youtube] VIDEO_ID: Requested format is not available.
 ERROR: [youtube] VIDEO_ID: no video formats found
 ```
 
-Mazinger works around this by asking yt-dlp for a known-good set of clients
-(`web_safari`, `web_embedded`, `visionos`) and excluding `tv_downgraded`, which
-is the one that returns the "reloaded" error. If that set fails, it
-automatically retries once with yt-dlp's own defaults, so a future yt-dlp
-release that fixes the problem upstream still wins.
+Despite how they read, all three mean the same thing, and none of them are
+about the video — YouTube challenges requests from shared and datacenter IPs,
+which is exactly what **Google Colab, a VPS, and CI runners** look like. A
+telling symptom: the metadata step succeeds (you see `Resolved slug: ...`) and
+only the download fails, because metadata needs no formats.
 
-If YouTube changes again before Mazinger does, override the client list without
-waiting for a new release:
+Mazinger asks yt-dlp for a client set chosen to survive this, and retries once
+with yt-dlp's own defaults if it fails:
+
+| Client | Why it is in the list |
+|---|---|
+| `web_safari` | Best format coverage; needs a JS runtime and a PO token on a challenged network |
+| `web_embedded` | No PO token needed, but only serves embeddable videos |
+| `visionos` | The only client needing no JS runtime — covers boxes without Node |
+| `android_vr` | No PO token, no JS — the one that still works from a datacenter IP. Low bitrate, so it only wins when nothing else is left |
+
+The `tv` clients are excluded: `tv` is what answers *"The page needs to be
+reloaded"*, and yt-dlp puts its `tv_downgraded` variant in the default set for
+**authenticated** sessions — the path taken as soon as you supply cookies.
+
+### If it still fails
+
+Work down this list; each step is stronger than the last.
+
+**1. Upgrade yt-dlp.** YouTube changes often and this is usually the whole fix:
 
 ```bash
-# Try a different set of clients
-export MAZINGER_YTDLP_PLAYER_CLIENT="tv,mweb"
+uv pip install --upgrade yt-dlp
+```
 
-# Or hand control back to yt-dlp entirely
+**2. Supply cookies.** In the Studio, use the **🍪 YouTube Cookies** panel; from
+the CLI, `--cookies cookies.txt` or `--cookies-from-browser chrome`. See
+[YouTube Cookies](youtube-cookies.md). Note that cookies used from a datacenter
+IP can get the account flagged — prefer a throwaway account.
+
+**3. Install a PO-token provider.** This is the reliable fix on Colab or a VPS.
+A "Proof of Origin" token is what YouTube uses to tell a genuine client from a
+scraper; the provider plugin mints them and yt-dlp picks it up automatically
+once installed — no configuration:
+
+```bash
+uv pip install bgutil-ytdlp-pot-provider
+```
+
+It needs Node on the `PATH`, which Mazinger already expects.
+
+**4. Override the client list** with `MAZINGER_YTDLP_PLAYER_CLIENT`:
+
+```bash
+# Force the client that needs neither a PO token nor a JS runtime
+export MAZINGER_YTDLP_PLAYER_CLIENT="android_vr"
+
+# Hand control back to yt-dlp entirely
 export MAZINGER_YTDLP_PLAYER_CLIENT="default"
 ```
 
@@ -59,14 +99,14 @@ The value is a comma-separated list matching yt-dlp's
 `--extractor-args "youtube:player_client=..."`; prefix a client with `-` to
 exclude it. Setting this replaces the whole ladder — one attempt, no fallback.
 
-**Before reaching for this, upgrade yt-dlp** — it is usually the real fix:
+To see which clients still work from your machine:
 
 ```bash
-uv pip install --upgrade yt-dlp
+yt-dlp --extractor-args "youtube:player_client=android_vr" -F "VIDEO_URL"
 ```
 
-If the error instead mentions signing in or a bot check, it is an
-authentication problem rather than a client problem — see
+If the error instead mentions signing in or a bot check, that is authentication
+rather than a blocked network — go straight to
 [YouTube Cookies](youtube-cookies.md).
 
 ---

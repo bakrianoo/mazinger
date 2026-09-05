@@ -30,19 +30,30 @@ def test_common_opts_pin_the_working_player_clients():
                 "web_safari",
                 "web_embedded",
                 "visionos",
+                "android_vr",
+                "-tv",
                 "-tv_downgraded",
             ]
         }
     }
 
 
-def test_tv_downgraded_is_excluded():
-    # tv_downgraded is what returns "The page needs to be reloaded", and it is
-    # in yt-dlp's default set for *authenticated* (cookie-carrying) sessions --
-    # exactly the path Mazinger takes once a user supplies cookies.
+def test_the_tv_clients_are_excluded():
+    # `tv` is the client that answers "The page needs to be reloaded", and
+    # `tv_downgraded` is its variant -- which matters because yt-dlp puts
+    # tv_downgraded in its default set for *authenticated* sessions, exactly
+    # the path Mazinger takes once a user supplies cookies.
     clients = D._yt_dlp_common_opts()["extractor_args"]["youtube"]["player_client"]
-    assert "-tv_downgraded" in clients
-    assert "tv_downgraded" not in clients
+    assert "-tv" in clients and "-tv_downgraded" in clients
+    assert "tv" not in clients and "tv_downgraded" not in clients
+
+
+def test_a_po_token_free_client_is_always_offered():
+    # web_safari needs a PO token for its format requests on a challenged
+    # network (a datacenter IP -- Colab, a VPS, CI).  android_vr needs neither
+    # a PO token nor a JS runtime, so it is what still works there.
+    clients = D._yt_dlp_common_opts()["extractor_args"]["youtube"]["player_client"]
+    assert "android_vr" in clients
 
 
 def test_a_jsless_client_is_always_offered():
@@ -172,3 +183,38 @@ def test_env_override_can_hand_control_back_to_yt_dlp(monkeypatch):
 def test_blank_env_override_is_ignored(monkeypatch):
     monkeypatch.setenv(D.PLAYER_CLIENT_ENV, "   ")
     assert D._player_client_attempts() == D._YT_PLAYER_CLIENT_ATTEMPTS
+
+
+# -- What the user is told when nothing works ----------------------------
+
+
+def test_exhausted_ladder_logs_something_actionable(caplog):
+    def call(opts):
+        raise RuntimeError(RELOAD_ERROR)
+
+    with caplog.at_level("ERROR"), pytest.raises(RuntimeError):
+        D._run_with_player_fallback(D._yt_dlp_common_opts, call, what="Test")
+
+    logged = caplog.text
+    # The raw yt-dlp message names no remedy; these are the ones that work.
+    assert "upgrade yt-dlp" in logged.lower()
+    assert "bgutil-ytdlp-pot-provider" in logged
+    assert "cookies" in logged.lower()
+    assert D.PLAYER_CLIENT_ENV in logged
+
+
+def test_blocked_errors_are_recognised_for_the_studio_message():
+    assert D.is_extraction_blocked_error(RELOAD_ERROR)
+    # A cookie problem has its own, more specific panel in the Studio.
+    assert not D.is_extraction_blocked_error(
+        "ERROR: Sign in to confirm you're not a bot. Use --cookies"
+    )
+
+
+def test_studio_translates_a_blocked_extraction(monkeypatch):
+    """The Studio must not surface the bare 'page needs to be reloaded' text."""
+    from mazinger.studio.pipeline import _format_pipeline_error
+
+    msg = _format_pipeline_error(RuntimeError(RELOAD_ERROR))
+    assert "bgutil-ytdlp-pot-provider" in msg
+    assert "needs to be reloaded" not in msg

@@ -204,23 +204,33 @@ def is_cookies_required_error(exc: BaseException | str) -> bool:
 
 # ── YouTube player-client selection ──────────────────────────────────────
 #
-# YouTube periodically breaks the InnerTube clients yt-dlp reaches for by
-# default.  The symptom is an extraction that dies before a single format is
-# listed, with "The page needs to be reloaded" or "no video formats found".
-# Naming the clients explicitly works around it: ``web_safari`` and
-# ``web_embedded`` are the currently reliable pair, and ``tv_downgraded`` is
-# excluded because it is the client that returns the "reloaded" error.
+# YouTube serves video formats through a set of internal "InnerTube" clients,
+# and which of them work depends on the network the request comes from.  When
+# none of the ones yt-dlp picked work, extraction dies before listing a single
+# format -- "The page needs to be reloaded", "no video formats found", or
+# "Requested format is not available".  Naming the clients explicitly is what
+# works around it.  Each is here for a reason:
 #
-# ``visionos`` is appended as a safety net: it is the only client that needs no
-# JavaScript runtime, so it keeps extraction working on boxes without Node.
-# yt-dlp drops it automatically (with a one-time warning) when cookies are in
-# play, since it does not support them -- leaving exactly the pair above.
+#   web_safari    -- best format coverage; needs a JS runtime, and its GVS
+#                    requests need a PO token on a challenged network.
+#   web_embedded  -- no PO token needed, but only for embeddable videos.
+#   visionos      -- the only client that needs no JS runtime at all, so it
+#                    keeps things working on a box without Node.
+#   android_vr    -- no PO token and no JS; the one that still tends to work
+#                    from a datacenter IP (Colab, a VPS, CI).  Low bitrate, so
+#                    it only wins the format selection when nothing else is
+#                    left.  Does not serve "made for kids" videos.
+#
+# The tv clients are excluded outright: `tv` is what answers "The page needs to
+# be reloaded", and `tv_downgraded` is its variant -- which matters because
+# yt-dlp puts `tv_downgraded` in its default set for *authenticated* sessions,
+# exactly the path taken once a user supplies cookies.
 #
 # Each entry is one attempt, tried in order.  The empty tuple means "leave
 # yt-dlp's own defaults alone", so a future yt-dlp release that fixes this
-# upstream still gets its shot if the pin above goes stale.
+# upstream still gets its shot if the list above goes stale.
 _YT_PLAYER_CLIENT_ATTEMPTS: tuple[tuple[str, ...], ...] = (
-    ("web_safari", "web_embedded", "visionos", "-tv_downgraded"),
+    ("web_safari", "web_embedded", "visionos", "android_vr", "-tv", "-tv_downgraded"),
     (),
 )
 
@@ -292,6 +302,41 @@ def _yt_dlp_common_opts(
     return opts
 
 
+#: Shown when every player client came back empty.  The cause is almost never
+#: the video -- it is the network the request came from, so the advice is about
+#: proving the request is genuine rather than about the URL.
+EXTRACTION_BLOCKED_HELP = f"""\
+YouTube would not hand over any video formats for this URL.
+
+This is almost always the network rather than the video: YouTube challenges
+requests from shared and datacenter IPs, which is what Colab, a VPS, and CI
+runners all look like.
+
+Fixes, cheapest first:
+  1. Upgrade yt-dlp — YouTube changes often and this is usually enough:
+       uv pip install --upgrade yt-dlp
+  2. Supply YouTube cookies (Studio: the "🍪 YouTube Cookies" panel;
+     CLI: --cookies cookies.txt, or --cookies-from-browser chrome).
+  3. Install a PO-token provider — the reliable fix on Colab or a VPS:
+       uv pip install bgutil-ytdlp-pot-provider
+     It needs Node, which Mazinger already expects, and yt-dlp picks it up
+     automatically once installed.
+  4. Override the player clients directly, e.g.:
+       export {PLAYER_CLIENT_ENV}=android_vr
+
+See docs/configuration.md → "YouTube Download Failures"."""
+
+
+def is_extraction_blocked_error(exc: BaseException | str) -> bool:
+    """Return ``True`` when YouTube refused to serve formats to this network.
+
+    Distinct from :func:`is_cookies_required_error`, which covers the cases
+    where yt-dlp names authentication as the fix.  Here nothing is missing from
+    the request except YouTube's trust in where it came from.
+    """
+    return is_player_client_error(exc)
+
+
 def _run_with_player_fallback(build_opts, call, *, what: str):
     """Run a yt-dlp *call*, retrying with the next player-client set on failure.
 
@@ -306,7 +351,17 @@ def _run_with_player_fallback(build_opts, call, *, what: str):
             return call(build_opts(clients))
         except Exception as exc:
             is_last = index == len(attempts) - 1
-            if is_last or not is_player_client_error(exc):
+            if not is_player_client_error(exc):
+                raise
+            if is_last:
+                # Every client came back empty.  The raw yt-dlp message says
+                # nothing the user can act on, so log what actually helps
+                # before letting the original exception propagate.
+                log.error(
+                    "%s failed on every player client. %s",
+                    what,
+                    EXTRACTION_BLOCKED_HELP,
+                )
                 raise
             log.warning(
                 "%s failed with player_client=%s (%s) — retrying with %s",

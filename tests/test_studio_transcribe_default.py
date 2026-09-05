@@ -162,3 +162,79 @@ class TestGatedCredentialGuard:
         assert "Sign in with Hugging Face" in message   # the Studio route
         assert "HF_TOKEN" in message                    # the CLI route
         assert "faster-whisper" in message              # the escape hatch
+
+
+class TestWebWarmupMatchesTheDefault:
+    """`mazinger web` should pre-download what the Studio actually uses.
+
+    Warming Faster Whisper while the dropdown defaults to CohereX cost a new
+    user a ~1.5 GB download of a model the default run never loads, and then
+    stalled again on the CohereX weights at the first mission.
+    """
+
+    def test_there_is_a_flag_to_warm_the_default_backend(self):
+        from mazinger.cli import _build_parser
+
+        args = _build_parser().parse_args(["web", "--with-coherex"])
+        assert args.with_coherex is True
+
+    def test_the_help_hint_matches_the_real_default_model(self):
+        """--help names the repo; a stale string here misleads about what downloads."""
+        from mazinger.cli._web import _DEFAULT_COHEREX_HINT
+        from mazinger.transcribe import DEFAULT_COHEREX_MODEL
+
+        assert _DEFAULT_COHEREX_HINT == DEFAULT_COHEREX_MODEL
+
+    def test_warmup_is_skipped_without_credentials(self, monkeypatch, caplog):
+        """No sign-in must not abort the launch — the UI can still sign in."""
+        import huggingface_hub
+
+        from mazinger.cli import _web
+
+        monkeypatch.delenv("HF_TOKEN", raising=False)
+        monkeypatch.setattr(huggingface_hub, "get_token", lambda: None)
+
+        def _boom(*a, **k):  # pragma: no cover — must never be reached
+            raise AssertionError("attempted a gated download with no token")
+
+        monkeypatch.setattr(huggingface_hub, "snapshot_download", _boom)
+
+        with caplog.at_level("WARNING"):
+            _web._setup_coherex(None)   # must not raise
+
+        assert "hugging face" in caplog.text.lower()
+
+    def test_warmup_downloads_the_default_model_when_signed_in(self, monkeypatch):
+        import huggingface_hub
+
+        from mazinger.cli import _web
+        from mazinger.transcribe import DEFAULT_COHEREX_MODEL
+
+        seen = []
+        monkeypatch.setenv("HF_TOKEN", "hf_dummy")
+        monkeypatch.setattr(huggingface_hub, "get_token", lambda: "hf_dummy")
+        monkeypatch.setattr(
+            huggingface_hub, "snapshot_download", lambda repo, **k: seen.append(repo)
+        )
+
+        _web._setup_coherex(None)
+        assert seen == [DEFAULT_COHEREX_MODEL]
+
+    def test_a_failed_download_does_not_abort_the_launch(self, monkeypatch, caplog):
+        """Gated terms not accepted yet is a warning, not a crash."""
+        import huggingface_hub
+
+        from mazinger.cli import _web
+
+        monkeypatch.setenv("HF_TOKEN", "hf_dummy")
+        monkeypatch.setattr(huggingface_hub, "get_token", lambda: "hf_dummy")
+
+        def _403(*a, **k):
+            raise RuntimeError("403 Forbidden: gated repo")
+
+        monkeypatch.setattr(huggingface_hub, "snapshot_download", _403)
+
+        with caplog.at_level("WARNING"):
+            _web._setup_coherex(None)   # must not raise
+
+        assert "403" in caplog.text

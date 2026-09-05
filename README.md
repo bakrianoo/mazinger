@@ -33,10 +33,12 @@ uv pip install "mazinger[all]"
 ### 2. Launch the Web UI
 
 ```bash
-mazinger web --with-ollama --with-faster-whisper
+mazinger web --with-ollama --with-coherex
 ```
 
-A local URL opens in your browser. Paste a video link, pick a voice, and click **Start**. The flags install a free local LLM (Ollama) and download the speech-recognition model on first run — no API keys required.
+A local URL opens in your browser. Paste a video link, pick a voice, and click **Start**. The flags install a free local LLM (Ollama) and pre-download **CohereX**, the transcription backend Studio defaults to — no API keys required.
+
+> **No Hugging Face account?** CohereX's weights are gated, so swap in `--with-faster-whisper` and pick **Faster Whisper** in the UI — it needs no sign-in and covers any language.
 
 > The flags only move the wait to launch time: if you run plain `mazinger web`, Studio installs Ollama and pulls the model by itself the first time you start a mission with the **Ollama (Local — Free)** provider. Set `OLLAMA_HOST` to use an Ollama server running elsewhere.
 

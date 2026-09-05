@@ -23,8 +23,14 @@ This bundles a single, mutually-compatible set of engines:
 After installing, launch the Studio:
 
 ```bash
-mazinger web --with-ollama --with-faster-whisper
+mazinger web --with-ollama --with-coherex
 ```
+
+`--with-coherex` pre-downloads the transcription backend the Studio dropdown
+actually defaults to. Its weights are gated, so it needs a Hugging Face
+sign-in (`HF_TOKEN`, or the Studio's **🤗 Hugging Face** panel) — without one
+the download is skipped with a warning and the Studio still launches. Use
+`--with-faster-whisper` instead to warm the backend that needs no credentials.
 
 `--with-ollama` installs Ollama, starts its server and pulls the LLM up front. It is an optimisation, not a requirement: with plain `mazinger web`, Studio performs the same setup automatically the first time you start a mission with the **Ollama (Local — Free)** provider, showing progress in the status box. Point `OLLAMA_HOST` at another machine to use a remote Ollama server instead (nothing is installed locally in that case).
 

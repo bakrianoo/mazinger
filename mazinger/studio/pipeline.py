@@ -142,15 +142,25 @@ def _format_pipeline_error(exc: BaseException, prefix: str = "Pipeline failed") 
 
     Detects yt-dlp's "cookies required" family of errors and replaces the
     raw stack-trace text with a clear instruction pointing the user to
-    the YouTube Cookies panel.
+    the YouTube Cookies panel.  The other yt-dlp family worth translating is
+    the one where YouTube serves no formats at all — the raw message there
+    ("The page needs to be reloaded") tells the user nothing about the fix.
     """
     try:
-        from mazinger.download import is_cookies_required_error
+        from mazinger.download import (
+            EXTRACTION_BLOCKED_HELP,
+            is_cookies_required_error,
+            is_extraction_blocked_error,
+        )
     except Exception:  # noqa: BLE001 — fail open: keep the raw error
         is_cookies_required_error = lambda _e: False  # noqa: E731
+        is_extraction_blocked_error = lambda _e: False  # noqa: E731
+        EXTRACTION_BLOCKED_HELP = ""
 
     if is_cookies_required_error(exc):
         return "❌ " + _COOKIES_FRIENDLY_MSG
+    if is_extraction_blocked_error(exc):
+        return f"❌ {EXTRACTION_BLOCKED_HELP}"
     return f"❌ {prefix}: {exc}"
 
 
