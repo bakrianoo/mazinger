@@ -84,8 +84,9 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     p.add_argument(
         "--server-port",
         type=int,
-        default=7860,
-        help="Port to bind the server to (default: 7860).",
+        default=None,
+        help="Port to bind the server to. By default, the first free port from 7860 "
+             "(or $GRADIO_SERVER_PORT) upward is used.",
     )
     p.add_argument("-v", "--verbose", action="store_true", help="Enable debug-level logging.")
 

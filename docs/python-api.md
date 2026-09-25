@@ -163,32 +163,58 @@ from mazinger import ProjectPaths
 ### Constructor
 
 ```python
-ProjectPaths(slug, base_dir="./mazinger_output")
+ProjectPaths(slug, base_dir="./mazinger_output", target_language=None)
 ```
 
+With `target_language`, the per-language paths are under
+`lang/<target_language>/`, which is how the pipeline lays out projects. Without
+it, they fall back to the project root (the legacy flat layout).
+
 ### Properties
+
+Paths are relative to `<base_dir>/projects/<slug>/`. `<lang>` is
+`lang/<target_language>/`.
 
 | Property | Path |
 |----------|------|
 | `root` | `<base_dir>/projects/<slug>/` |
 | `video` | `source/video.mp4` |
 | `audio` | `source/audio.mp3` |
+| `source_loudness` | `source/loudness.json` |
 | `source_srt` | `transcription/source.srt` |
 | `source_raw_srt` | `transcription/source.raw.srt` |
-| `translated_raw_srt` | `transcription/translated.raw.srt` |
-| `final_srt` | `subtitles/translated.srt` |
+| `reviewed_srt` | `transcription/source.reviewed.srt` |
 | `thumbs_meta` | `thumbnails/meta.json` |
 | `description` | `analysis/description.json` |
-| `final_audio` | `tts/dubbed.wav` |
-| `final_video` | `tts/dubbed.mp4` |
-| `tts_segments_dir` | `tts/segments/` |
-| `voice_profile_dir` | `voice_profile/` |
+| `translated_raw_srt` | `<lang>/transcription/translated.raw.srt` |
+| `final_srt` | `<lang>/subtitles/translated.srt` |
+| `final_audio` | `<lang>/tts/dubbed.wav` |
+| `final_video` | `<lang>/tts/dubbed.mp4` |
+| `tts_segments_dir` | `<lang>/tts/segments/` |
+| `voice_profile_dir` | `<lang>/voice_profile/` |
+| `voice_reference_dir` | `<lang>/voice_profile/reference/` |
+| `run_info` | `<lang>/run.json` |
+| `editor_dir` | `<lang>/editor/` |
 
 ### Methods
 
 ```python
-proj.ensure_dirs()   # Create all subdirectories (idempotent). Returns self.
-proj.summary()       # Human-readable overview of which files exist.
+proj.ensure_dirs()         # Create all subdirectories (idempotent). Returns self.
+proj.summary()             # Human-readable overview of which files exist.
+proj.background_audio(sr)  # source/background.<sr>.wav — the cached background stem
+```
+
+### Run record
+
+`MazingerDubber.dub()` writes the settings it used to `<lang>/run.json`
+(never API keys or tokens), so a single step can be redone later with the
+same settings:
+
+```python
+from mazinger.runinfo import load_run_info
+
+info = load_run_info(proj)   # dict, or None for projects dubbed before 2.3
+print(info["tts"]["engine"], info["voice"]["kind"], info["assembly"]["tempo_mode"])
 ```
 
 ---
@@ -428,7 +454,108 @@ post_process("dubbed.wav", "audio.mp3", "dubbed_final.wav")
 
 # Skip background mixing, only normalise loudness
 post_process("dubbed.wav", "audio.mp3", "dubbed_final.wav", mix_background=False)
+
+# Keep the background stem and the source loudness for later runs.  Both are
+# slow on long videos (Demucs, and a loudness pass of ~1 min per hour) and
+# depend only on the source, so they are reused while audio.mp3 is unchanged.
+post_process(
+    "dubbed.wav", "audio.mp3", "dubbed_final.wav",
+    background_cache=proj.background_audio(),
+    loudness_cache=proj.source_loudness,
+)
 ```
+
+`assemble_timeline` prepares segments (load, tempo change, trim) on
+`assemble.ASSEMBLE_WORKERS` threads (at most 8) and places them in order, so
+the result is the same as a sequential run.
+
+### Single-chunk helpers
+
+Redo one step for one segment, with the same prompts and settings as the full
+pipeline. The [Editor](editor.md) uses these.
+
+#### translate_chunk
+
+```python
+from mazinger.translate import translate_chunk
+
+text = translate_chunk(
+    "and that is why the gradient vanishes",
+    prev_ctx=["We multiply many small numbers."],   # source text of the chunks before
+    next_ctx=["Let's fix it with residual links."], # and after (context only)
+    duration=3.2,                  # the chunk's slot in seconds; sets the word budget
+    description=desc,              # from describe_content (optional)
+    client=client,
+    llm_model="gpt-4.1",
+    source_language="English",
+    target_language="Spanish",
+)
+```
+
+Full signature:
+
+```python
+translate_chunk(
+    source_text,
+    *,
+    prev_ctx=None, next_ctx=None,  # list[str]
+    duration,                      # float, seconds
+    description=None,              # dict
+    client,
+    llm_model="gpt-4.1",
+    source_language="auto",
+    target_language="English",
+    words_per_second=None,         # estimated from the chunk when None
+    duration_budget=0.85,
+    translate_technical_terms=False,
+    user_instructions="",
+    video_meta=None,               # dict — the video's title, description and channel, as context
+    thumb_paths=None, start=None,  # screenshots inside the chunk's time range are attached
+    usage_tracker=None,
+)
+```
+
+It raises `ValueError` if the source text is empty or no translation can be
+parsed from the reply. It never returns the source text as the translation.
+For dubs made with a template translation model (such as translategemma), use
+`translate.translate_text_simple(text, client, llm_model=..., source_language=...,
+target_language=...)`.
+
+#### synthesize_one
+
+```python
+from mazinger import tts
+
+model = tts.load_model(engine="qwen", device="cuda:0")
+voice = tts.create_voice_prompt(model, "speaker.wav", "Transcript.", engine="qwen")
+
+path, seconds = tts.synthesize_one(voice, "Hola a todos.", "./seg_0042.wav", language="Spanish")
+```
+
+It always overwrites *out_path*. The audio is written to `<out_path>.part` and
+then renamed, so an interrupted run never leaves a truncated WAV behind.
+`synthesize_segments` uses it for each entry.
+
+#### transcribe_clip
+
+```python
+from mazinger.transcribe import transcribe_clip
+
+text = transcribe_clip(
+    "audio.mp3", 83.4, 87.9,       # the range to transcribe, in seconds
+    pad=0.3,                       # extra audio on each side, so edge words are not cut
+    method="faster-whisper", device="cuda", language="en",
+)
+```
+
+Keyword arguments go to `transcribe()`. Recognized segments whose midpoint
+falls inside the padding belong to the neighboring chunks and are dropped.
+Returns `""` for silence.
+
+### Editor
+
+`mazinger.editor` holds the Editor's logic without the UI. See
+[Editor → Python API](editor.md#python-api).
 
 ### subtitle
 

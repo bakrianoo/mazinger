@@ -153,6 +153,10 @@ def free_gpu_and_restart_ollama() -> str:
     import signal
     msgs: list[str] = []
 
+    # 0. Models the Editor keeps loaded between single-chunk actions
+    from mazinger.gpu import release_idle
+    release_idle()
+
     # 1. Kill lingering Ollama runner processes (hold GPU for loaded models)
     try:
         out = sp.run(

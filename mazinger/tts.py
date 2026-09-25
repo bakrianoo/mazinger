@@ -179,6 +179,23 @@ class _QwenTTSWrapper(TTSWrapper):
     def synthesize(self, text: str, language: str = "English") -> tuple[np.ndarray, int]:
         return _synthesize_qwen(self.model, self.voice_prompt, text, language)
 
+    def synthesize_batch(
+        self, items: list[tuple[str, str]],
+    ) -> list[tuple[np.ndarray, int]]:
+        """One batched ``generate_voice_clone`` call; the prompt is shared."""
+        if not items:
+            return []
+        for _, lang in items:
+            validate_language(lang)
+        wavs, sr = self.model.generate_voice_clone(
+            text=[t for t, _ in items],
+            language=[lang for _, lang in items],
+            voice_clone_prompt=self.voice_prompt,
+        )
+        if len(wavs) != len(items):
+            raise RuntimeError(f"Qwen TTS returned {len(wavs)} clips for {len(items)} texts")
+        return [(w, sr) for w in wavs]
+
     def unload(self) -> None:
         import torch
         _remove_from_cache(self.model)
@@ -713,6 +730,57 @@ def create_voice_prompt(
         raise ValueError(f"Unknown TTS engine: {engine!r}")
 
 
+def synthesize_one(
+    voice_prompt: TTSWrapper | Any,
+    text: str,
+    out_path: str,
+    language: str = "English",
+    *,
+    model: Any = None,
+) -> tuple[str, float]:
+    """Synthesise *text* into a WAV at *out_path*, overwriting any existing file.
+
+    Parameters:
+        voice_prompt: A :class:`TTSWrapper` from :func:`create_voice_prompt`,
+                      or a legacy Qwen prompt (then *model* is required).
+        text:         Text to speak.
+        out_path:     Destination WAV path; parent directories are created.
+        language:     Target language name (e.g. ``English``).
+        model:        The loaded Qwen model, for legacy prompts only.
+
+    Returns:
+        ``(out_path, duration_seconds)``.
+    """
+    text = text.strip()
+    if not text:
+        raise ValueError("Cannot synthesise empty text")
+
+    if isinstance(voice_prompt, TTSWrapper):
+        audio_data, sr = voice_prompt.synthesize(text, language)
+    else:
+        if model is None:
+            raise ValueError("A legacy Qwen voice prompt needs the loaded model")
+        wavs, sr = model.generate_voice_clone(
+            text=text, language=language, voice_clone_prompt=voice_prompt,
+        )
+        audio_data = wavs[0]
+
+    return out_path, write_segment(out_path, audio_data, sr)
+
+
+def write_segment(out_path: str, audio: np.ndarray, sr: int) -> float:
+    """Write a synthesised segment to *out_path*; return its duration.
+
+    Writes beside the target and renames, so an interrupted write never
+    leaves a truncated WAV that later runs would reuse as finished.
+    """
+    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+    tmp_path = out_path + ".part"
+    sf.write(tmp_path, audio, sr, format="WAV")
+    os.replace(tmp_path, out_path)
+    return len(audio) / sr
+
+
 def synthesize_segments(
     model: Any,
     voice_prompt: TTSWrapper | Any,
@@ -779,22 +847,14 @@ def synthesize_segments(
     if pending:
         log.info("TTS: %d segments to synthesize (%d cached)",
                  len(pending), len(srt_entries) - len(pending))
-        use_wrapper = isinstance(voice_prompt, TTSWrapper)
         total = len(pending)
 
         for i, (seg_idx, text, wav_path) in enumerate(pending, 1):
             log.info("Synthesising segment %d/%d", i, total)
-            if use_wrapper:
-                audio_data, sr = voice_prompt.synthesize(text, language)
-            else:
-                # Legacy Qwen API (backward compatibility)
-                wavs, sr = model.generate_voice_clone(
-                    text=text, language=language, voice_clone_prompt=voice_prompt,
-                )
-                audio_data = wavs[0]
-
-            sf.write(wav_path, audio_data, sr)
-            segment_info[seg_idx]["actual_dur"] = len(audio_data) / sr
+            _, actual_dur = synthesize_one(
+                voice_prompt, text, wav_path, language, model=model,
+            )
+            segment_info[seg_idx]["actual_dur"] = actual_dur
 
     produced = sum(1 for s in segment_info if s["wav_path"])
     skipped = sum(1 for s in segment_info if s.get("_skipped"))

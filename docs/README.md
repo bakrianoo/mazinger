@@ -14,5 +14,6 @@
 6. **[Voice Profiles](voice-profiles.md)** — Voice themes, built-in profiles, custom voice cloning, and profile generation
 7. **[Subtitle Styling](subtitle-styling.md)** — Fonts, colors, positioning, RTL support, Google Fonts
 8. **[Configuration](configuration.md)** — Environment variables, caching, tempo control, LLM usage tracking
-9. **[Project Structure](project-structure.md)** — Output directory layout and file naming conventions
-10. **[Releasing](releasing.md)** — Publishing new versions to PyPI via GitHub Actions Trusted Publishing
+9. **[Editor](editor.md)** — Fix a finished dub chunk by chunk in Mazinger Studio: edit, split, merge, re-dub, re-assemble
+10. **[Project Structure](project-structure.md)** — Output directory layout and file naming conventions
+11. **[Releasing](releasing.md)** — Publishing new versions to PyPI via GitHub Actions Trusted Publishing

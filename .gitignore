@@ -6,7 +6,7 @@ __pycache__/
 mazinger_output
 tests/*.mp3
 tests/*.mp4
-
+*.txt
 
 # Distribution / packaging
 build/

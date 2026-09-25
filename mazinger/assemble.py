@@ -6,6 +6,9 @@ import logging
 import os
 import shutil
 import subprocess
+from collections import deque
+from concurrent.futures import Executor, ThreadPoolExecutor
+from typing import Callable, Iterable, Iterator
 
 import numpy as np
 import soundfile as sf
@@ -17,9 +20,31 @@ log = logging.getLogger(__name__)
 
 TARGET_SR = 24_000
 
+# Segments prepared (loaded, tempo-stretched, trimmed) in parallel by
+# assemble_timeline.  Most of that time is spent waiting on ffmpeg.
+ASSEMBLE_WORKERS = min(8, os.cpu_count() or 1)
+
+# Formats _load_and_resample reads without ffmpeg.  Lossy formats always go
+# through ffmpeg: decoders disagree on encoder-delay padding.
+_DIRECT_FORMATS = ("WAV", "WAVEX", "RF64", "FLAC", "AIFF")
+
 
 def _load_and_resample(wav_path: str, target_sr: int) -> np.ndarray:
-    """Load a WAV and convert to mono at *target_sr* using ffmpeg."""
+    """Load an audio file as mono float32 at *target_sr*.
+
+    Lossless mono files already at *target_sr* (the TTS segments) are read
+    directly, which is ~100× faster than starting ffmpeg and gives the same
+    samples; anything else is converted with ffmpeg.
+    """
+    try:
+        info = sf.info(wav_path)
+    except Exception:  # noqa: BLE001 — not a format soundfile reads
+        info = None
+    if (info is not None and info.samplerate == target_sr and info.channels == 1
+            and info.format in _DIRECT_FORMATS):
+        data, _ = sf.read(wav_path, dtype="float32")
+        return data
+
     result = subprocess.run(
         [
             "ffmpeg", "-y", "-i", wav_path,
@@ -144,6 +169,52 @@ def _speech_density(audio: np.ndarray, sr: int,
     return float(np.mean(energy >= thresh))
 
 
+def _ordered_map(
+    pool: Executor, fn: Callable, items: Iterable, window: int,
+) -> Iterator:
+    """``pool.map(fn, items)`` with at most *window* results in flight.
+
+    Results come back in order; memory stays bounded however many items
+    there are (``Executor.map`` submits everything up front).
+    """
+    pending: deque = deque()
+    try:
+        for item in items:
+            pending.append(pool.submit(fn, item))
+            if len(pending) >= window:
+                yield pending.popleft().result()
+        while pending:
+            yield pending.popleft().result()
+    finally:
+        for fut in pending:
+            fut.cancel()
+
+
+# Whole-timeline scans run over blocks of this many samples.  A 2 h timeline
+# is ~690 MB; full-array temporaries (np.abs, np.nonzero's int64 indices)
+# would multiply its peak memory several times over.
+_SCAN_BLOCK = 1 << 20
+
+
+def _last_nonzero(a: np.ndarray) -> int:
+    """Index of the last non-zero element of *a*, or ``-1`` if all zero."""
+    for hi in range(len(a), 0, -_SCAN_BLOCK):
+        lo = max(0, hi - _SCAN_BLOCK)
+        nz = np.flatnonzero(a[lo:hi])
+        if len(nz):
+            return lo + int(nz[-1])
+    return -1
+
+
+def _peak_abs(a: np.ndarray) -> float:
+    """``np.max(np.abs(a))`` without a full-size temporary."""
+    peak = 0.0
+    for lo in range(0, len(a), _SCAN_BLOCK):
+        block = a[lo:lo + _SCAN_BLOCK]
+        peak = max(peak, float(block.max()), -float(block.min()))
+    return peak
+
+
 def assemble_timeline(
     segment_info: list[dict],
     original_duration: float,
@@ -207,20 +278,26 @@ def assemble_timeline(
     total_samples = int((original_duration + tail_pad_sec) * sample_rate)
     timeline = np.zeros(total_samples, dtype=np.float32)
 
-    gap_samps = int(sample_rate * segment_gap_ms / 1000)
-
     stats = {"sped_up": 0, "slowed_down": 0, "ok": 0, "skipped": 0, "trimmed": 0}
     overflow_total = 0.0
 
     valid_segs = [s for s in segment_info if s.get("wav_path") is not None]
     valid_segs.sort(key=lambda s: s["start"])
 
-    for seg_i, seg in enumerate(tqdm(valid_segs, desc="Aligning")):
+    def prepare(seg_i: int) -> tuple[int, np.ndarray, str, float] | None:
+        """Steps 1–2 for one segment: load, tempo-stretch, trim and fade.
+
+        Depends only on the segment and the next one's start, so segments
+        are prepared in parallel; placing them (step 3) stays in order.
+        Returns ``(start_samp, audio, outcome, trimmed_secs)``, or ``None``
+        for an empty segment.
+        """
+        seg = valid_segs[seg_i]
         raw_audio = _load_and_resample(seg["wav_path"], sample_rate)
         actual_dur = len(raw_audio) / sample_rate
         if actual_dur <= 0:
-            stats["skipped"] += 1
-            continue
+            return None
+        trimmed_secs = 0.0
 
         target_dur = seg["target_dur"]
         start_samp = int(seg["start"] * sample_rate)
@@ -242,7 +319,7 @@ def assemble_timeline(
         if tempo_mode == "fixed" and fixed_tempo is not None:
             stretched_path = seg["wav_path"].replace(".wav", "_stretched.wav")
             audio = _tempo_stretch(seg["wav_path"], fixed_tempo, stretched_path, sample_rate)
-            stats["sped_up"] += 1
+            outcome = "sped_up"
 
         elif tempo_mode in ("auto", "dynamic"):
             if speed_ratio > 1.0 + speed_threshold:
@@ -250,7 +327,7 @@ def assemble_timeline(
                 effective_ratio = min(speed_ratio, max_tempo)
                 stretched_path = seg["wav_path"].replace(".wav", "_stretched.wav")
                 audio = _tempo_stretch(seg["wav_path"], effective_ratio, stretched_path, sample_rate)
-                stats["sped_up"] += 1
+                outcome = "sped_up"
             elif speed_ratio < 1.0 - speed_threshold:
                 # Segment is shorter than its slot — slow it down toward
                 # target_fill of the window.  This avoids trying to fill
@@ -268,7 +345,7 @@ def assemble_timeline(
                 if effective_ratio < 1.0 - speed_threshold:
                     slowed_path = seg["wav_path"].replace(".wav", "_slowed.wav")
                     audio = _tempo_stretch(seg["wav_path"], effective_ratio, slowed_path, sample_rate)
-                    stats["slowed_down"] += 1
+                    outcome = "slowed_down"
                     log.debug(
                         "Seg %s: slowed %.2fx (%.1fs → %.1fs, "
                         "fill %.0f%% → %.0f%% of %.1fs window)",
@@ -279,14 +356,14 @@ def assemble_timeline(
                     )
                 else:
                     audio = raw_audio
-                    stats["ok"] += 1
+                    outcome = "ok"
             else:
                 audio = raw_audio
-                stats["ok"] += 1
+                outcome = "ok"
         else:
             # tempo_mode == "off"
             audio = raw_audio
-            stats["ok"] += 1
+            outcome = "ok"
 
         # -- Step 2: handle overflow after stretch -------------------------
         if is_last:
@@ -296,8 +373,6 @@ def assemble_timeline(
                 trim_at = _find_last_silence(audio, sample_rate, clip_samps)
                 trimmed_secs = (len(audio) - trim_at) / sample_rate
                 audio = audio[:trim_at]
-                overflow_total += trimmed_secs
-                stats["trimmed"] += 1
                 if trimmed_secs > 0.2:
                     log.warning(
                         "Seg %s (last): trimmed %.2fs to fit budget+pad %.2fs",
@@ -321,13 +396,11 @@ def assemble_timeline(
             max_len = max(0, next_start_samp - start_samp)
 
             if len(audio) > max_len:
-                overflow_secs = (len(audio) - max_len) / sample_rate
-                overflow_total += overflow_secs
+                overflow_secs = trimmed_secs = (len(audio) - max_len) / sample_rate
                 trim_at = _find_last_silence(audio, sample_rate, max_len)
                 # Guarantee no overlap even if no silence was found.
                 trim_at = min(trim_at, max_len)
                 audio = audio[:trim_at]
-                stats["trimmed"] += 1
                 if overflow_secs > 0.2:
                     log.warning(
                         "Seg %s: trimmed %.2fs to prevent overlapping the "
@@ -343,11 +416,26 @@ def assemble_timeline(
             else:
                 audio = _fade(audio, sample_rate, fade_in_ms=15, fade_out_ms=50)
 
-        # -- Step 3: paste at SRT start time ------------------------------
-        end_samp = min(start_samp + len(audio), total_samples)
-        seg_len = end_samp - start_samp
-        if seg_len > 0:
-            timeline[start_samp:end_samp] += audio[:seg_len]
+        return start_samp, audio, outcome, trimmed_secs
+
+    workers = max(1, min(ASSEMBLE_WORKERS, len(valid_segs)))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        prepared = _ordered_map(pool, prepare, range(len(valid_segs)), window=4 * workers)
+        for result in tqdm(prepared, total=len(valid_segs), desc="Aligning"):
+            if result is None:
+                stats["skipped"] += 1
+                continue
+            start_samp, audio, outcome, trimmed_secs = result
+            stats[outcome] += 1
+            if trimmed_secs > 0:
+                stats["trimmed"] += 1
+                overflow_total += trimmed_secs
+
+            # -- Step 3: paste at SRT start time --------------------------
+            end_samp = min(start_samp + len(audio), total_samples)
+            seg_len = end_samp - start_samp
+            if seg_len > 0:
+                timeline[start_samp:end_samp] += audio[:seg_len]
 
     stats["skipped"] += len(segment_info) - len(valid_segs)
 
@@ -355,8 +443,8 @@ def assemble_timeline(
     # duration, whichever is longer, plus a small cushion for the fade.
     orig_samples = int(original_duration * sample_rate)
     # Find actual last non-zero sample (= where audio content ends)
-    nz = np.nonzero(timeline)[0]
-    content_end = int(nz[-1]) + 1 if len(nz) else orig_samples
+    last_nz = _last_nonzero(timeline)
+    content_end = last_nz + 1 if last_nz >= 0 else orig_samples
 
     # Apply a gentle fade-out at the actual content boundary so the
     # listener doesn't hear a hard cut when the last segment finishes.
@@ -374,7 +462,7 @@ def assemble_timeline(
     placed_end = min(placed_end, total_samples)
     timeline = timeline[:placed_end]
 
-    peak = np.max(np.abs(timeline))
+    peak = _peak_abs(timeline)
     if peak > 1.0:
         log.info("Normalising peak %.2f to 1.0", peak)
         timeline /= peak
@@ -398,8 +486,8 @@ def assemble_timeline(
     return output_path
 
 
-def _measure_loudness(path: str) -> float:
-    """Return integrated loudness (LUFS) of an audio file via ffmpeg."""
+def _loudness_or_none(path: str) -> float | None:
+    """Integrated loudness (LUFS) of an audio file via ffmpeg, or ``None``."""
     result = subprocess.run(
         ["ffmpeg", "-hide_banner", "-i", path,
          "-af", "loudnorm=print_format=json", "-f", "null", "-"],
@@ -408,40 +496,181 @@ def _measure_loudness(path: str) -> float:
     import json as _json, re as _re
     m = _re.search(r'\{[^}]+"input_i"[^}]+\}', result.stderr, _re.DOTALL)
     if m:
-        data = _json.loads(m.group())
-        return float(data["input_i"])
-    return -24.0
+        try:
+            value = float(_json.loads(m.group())["input_i"])
+        except (ValueError, KeyError):
+            return None
+        return value if np.isfinite(value) else None
+    return None
+
+
+def _measure_loudness(path: str) -> float:
+    """Return integrated loudness (LUFS) of an audio file via ffmpeg."""
+    value = _loudness_or_none(path)
+    return -24.0 if value is None else value
+
+
+def measure_loudness_cached(audio_path: str, cache_path: str) -> float:
+    """Integrated loudness of *audio_path*, kept in *cache_path* (JSON).
+
+    Measuring takes about a minute per hour of audio, and the source of a
+    project never changes, so the value is reused while *audio_path* keeps
+    the size and modification time it was measured with.  A failed
+    measurement (the -24 LUFS fallback) is not cached.
+    """
+    import json
+
+    st = os.stat(audio_path)
+    stamp = {"size": st.st_size, "mtime_ns": st.st_mtime_ns}
+    try:
+        with open(cache_path, encoding="utf-8") as fh:
+            cached = json.load(fh)
+        if cached.get("source") == stamp:
+            return float(cached["integrated_lufs"])
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        pass
+
+    value = _loudness_or_none(audio_path)
+    if value is None:
+        return -24.0
+    os.makedirs(os.path.dirname(cache_path) or ".", exist_ok=True)
+    tmp = f"{cache_path}.{os.getpid()}.tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump({"source": stamp, "integrated_lufs": value}, fh)
+    os.replace(tmp, cache_path)
+    log.info("Source loudness cached: %.1f LUFS (%s)", value, cache_path)
+    return value
+
+
+# Demucs runs over blocks of the source so memory stays flat on long videos:
+# the separated stems of a whole 2 h file would need ~10 GB of RAM.  Each
+# block is decoded with extra context on both sides, which is separated and
+# then discarded so block seams are inaudible.
+DEMUCS_BLOCK_SEC = 300.0
+DEMUCS_CONTEXT_SEC = 5.0
+
+
+def _decode_audio(audio_path: str, sr: int, channels: int,
+                  start: float = 0.0, duration: float | None = None) -> np.ndarray:
+    """Decode a range of *audio_path* to float32 ``(samples, channels)`` via ffmpeg."""
+    cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error"]
+    if start > 0:
+        cmd += ["-ss", f"{start:.3f}"]
+    if duration is not None:
+        cmd += ["-t", f"{duration:.3f}"]
+    cmd += ["-i", audio_path, "-ar", str(sr), "-ac", str(channels), "-f", "f32le", "-"]
+    result = subprocess.run(cmd, capture_output=True, check=True)
+    return np.frombuffer(result.stdout, dtype=np.float32).reshape(-1, channels)
+
+
+def _load_demucs(device: str | None) -> tuple[object, str]:
+    """Load htdemucs and return ``(model, device)``."""
+    import torch
+    from demucs.pretrained import get_model
+
+    if device is None:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+    model = get_model("htdemucs")
+    model.to(device)
+    model.eval()
+    return model, device
+
+
+def _unload_demucs(model: object, device: str) -> None:
+    import gc
+    del model
+    gc.collect()
+    if str(device).startswith("cuda"):
+        import torch
+        torch.cuda.empty_cache()
+
+
+def _demucs_background_block(
+    model, block: np.ndarray, sr: int, *,
+    device: str, segment: float | None, overlap: float,
+) -> np.ndarray:
+    """Separate one ``(samples, channels)`` block; return mono background at *sr*."""
+    import torch
+    import torchaudio
+    from demucs.apply import apply_model
+
+    wav = torch.from_numpy(np.ascontiguousarray(block.T))
+    with torch.no_grad():
+        # split=True runs the model over `segment`-second windows moved to
+        # *device* one at a time, so GPU memory does not grow with the block.
+        sources = apply_model(
+            model, wav[None], device=device, split=True,
+            segment=segment, overlap=overlap, progress=False,
+        )
+    stems = sources[0].cpu().numpy()  # (stems, channels, samples)
+    vocals_idx = model.sources.index("vocals")
+    bg = (stems.sum(axis=0) - stems[vocals_idx]).mean(axis=0).astype(np.float32)
+    if model.samplerate != sr:
+        bg = torchaudio.functional.resample(
+            torch.from_numpy(bg), model.samplerate, sr,
+        ).numpy()
+    return bg
+
+
+def _extract_background_demucs(
+    audio_path: str, out_path: str, sr: int, *,
+    device: str | None = None,
+    segment: float | None = None,
+    overlap: float = 0.25,
+    block_sec: float = DEMUCS_BLOCK_SEC,
+    context_sec: float = DEMUCS_CONTEXT_SEC,
+) -> None:
+    model, device = _load_demucs(device)
+    try:
+        total = get_audio_duration(audio_path)
+        n_blocks = max(1, int(np.ceil(total / block_sec)))
+        log.info(
+            "Extracting background with demucs on %s (%.0fs in %d block(s))",
+            device, total, n_blocks,
+        )
+        with sf.SoundFile(out_path, "w", samplerate=sr, channels=1, format="WAV") as out:
+            for b in tqdm(range(n_blocks), desc="Separating", disable=n_blocks == 1):
+                core_start = b * block_sec
+                is_last = b == n_blocks - 1
+                core_end = total if is_last else (b + 1) * block_sec
+                read_start = max(0.0, core_start - context_sec)
+                read_end = None if is_last else core_end + context_sec
+
+                block = _decode_audio(
+                    audio_path, model.samplerate, model.audio_channels,
+                    start=read_start,
+                    duration=None if read_end is None else read_end - read_start,
+                )
+                if not len(block):
+                    break
+                bg = _demucs_background_block(
+                    model, block, sr, device=device, segment=segment, overlap=overlap,
+                )
+                # Slice positions come from absolute times so rounding never
+                # accumulates across blocks.
+                offset = round(core_start * sr) - round(read_start * sr)
+                if is_last:
+                    core = bg[offset:]
+                else:
+                    n = round(core_end * sr) - round(core_start * sr)
+                    core = bg[offset:offset + n]
+                    if len(core) < n:
+                        core = np.pad(core, (0, n - len(core)))
+                out.write(core)
+    finally:
+        _unload_demucs(model, device)
 
 
 def _extract_background(audio_path: str, out_path: str, sr: int = TARGET_SR) -> str:
     """Extract non-vocal background from *audio_path*.
 
-    Uses demucs (htdemucs model) for high-quality source separation.
+    Uses demucs (htdemucs model) for high-quality source separation, block
+    by block (see :data:`DEMUCS_BLOCK_SEC`) and on the GPU when available.
     Falls back to spectral masking via librosa when demucs is unavailable.
     """
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
     try:
-        import torch, torchaudio
-        from demucs.pretrained import get_model
-        from demucs.apply import apply_model
-
-        log.info("Extracting background with demucs")
-        model = get_model("htdemucs")
-        model.eval()
-        wav, wav_sr = torchaudio.load(audio_path)
-        if wav_sr != model.samplerate:
-            wav = torchaudio.functional.resample(wav, wav_sr, model.samplerate)
-        with torch.no_grad():
-            sources = apply_model(model, wav.unsqueeze(0))
-        # sources: (1, num_stems, channels, samples)
-        vocals_idx = model.sources.index("vocals")
-        bg = sources[0]
-        bg[vocals_idx] = 0
-        bg_np = bg.sum(dim=0).mean(dim=0).cpu().numpy()
-        import librosa
-        if model.samplerate != sr:
-            bg_np = librosa.resample(bg_np, orig_sr=model.samplerate, target_sr=sr)
-        sf.write(out_path, bg_np, sr)
+        _extract_background_demucs(audio_path, out_path, sr)
     except Exception as exc:
         log.info("Demucs unavailable (%s), using spectral masking fallback", exc)
         import librosa
@@ -454,6 +683,49 @@ def _extract_background(audio_path: str, out_path: str, sr: int = TARGET_SR) -> 
     return out_path
 
 
+def background_cache_path(audio_path: str, sr: int = TARGET_SR) -> str:
+    """Return the cache path of the background stem for *audio_path*.
+
+    ``source/audio.mp3`` → ``source/background.<sr>.wav``.
+    """
+    return os.path.join(os.path.dirname(audio_path) or ".", f"background.{sr}.wav")
+
+
+def extract_background_cached(
+    audio_path: str,
+    cache_path: str | None = None,
+    sr: int = TARGET_SR,
+) -> str:
+    """Return a background stem for *audio_path*, extracting it only when needed.
+
+    The stem at *cache_path* (default: :func:`background_cache_path`) is
+    reused when it is at least as new as *audio_path*; otherwise it is
+    re-extracted.  The file is replaced atomically, so a concurrent reader
+    never sees a partial stem.
+    """
+    cache_path = cache_path or background_cache_path(audio_path, sr)
+    try:
+        fresh = (
+            os.path.getsize(cache_path) > 0
+            and os.path.getmtime(cache_path) >= os.path.getmtime(audio_path)
+        )
+    except OSError:
+        fresh = False
+    if fresh:
+        log.info("Reusing cached background stem: %s", cache_path)
+        return cache_path
+
+    tmp_path = f"{os.path.splitext(cache_path)[0]}.{os.getpid()}.part.wav"
+    try:
+        _extract_background(audio_path, tmp_path, sr=sr)
+        os.replace(tmp_path, cache_path)
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+    log.info("Background stem cached: %s", cache_path)
+    return cache_path
+
+
 def post_process(
     dubbed_path: str,
     original_audio: str,
@@ -462,6 +734,8 @@ def post_process(
     loudness_match: bool = True,
     mix_background: bool = True,
     background_volume: float = 0.15,
+    background_cache: str | None = None,
+    loudness_cache: str | None = None,
 ) -> str:
     """Apply loudness normalisation and background audio mixing.
 
@@ -472,6 +746,14 @@ def post_process(
         loudness_match:    Match dubbed loudness to the original.
         mix_background:    Extract and mix background from original.
         background_volume: Gain multiplier for the background layer (0.0–1.0).
+        background_cache:  Where to keep the extracted background stem so
+                           later calls reuse it (see
+                           :func:`extract_background_cached`).  When
+                           ``None``, the stem is re-extracted every time
+                           into ``background.wav`` beside *output_path*.
+        loudness_cache:    JSON file keeping the loudness of *original_audio*
+                           so later calls skip measuring it again (see
+                           :func:`measure_loudness_cached`).
     """
     if not loudness_match and not mix_background:
         if dubbed_path != output_path:
@@ -483,7 +765,10 @@ def post_process(
 
     # -- loudness matching ------------------------------------------------
     if loudness_match:
-        target_lufs = _measure_loudness(original_audio)
+        if loudness_cache:
+            target_lufs = measure_loudness_cached(original_audio, loudness_cache)
+        else:
+            target_lufs = _measure_loudness(original_audio)
         target_lufs = max(target_lufs, -30.0)  # safety floor
         norm_path = output_path + ".norm.wav"
         subprocess.run(
@@ -497,9 +782,12 @@ def post_process(
 
     # -- background mixing ------------------------------------------------
     if mix_background:
-        bg_path = os.path.join(os.path.dirname(output_path), "background.wav")
-        _extract_background(original_audio, bg_path, sr=TARGET_SR)
-        log.info("Background audio saved: %s", bg_path)
+        if background_cache:
+            bg_path = extract_background_cached(original_audio, background_cache, sr=TARGET_SR)
+        else:
+            bg_path = os.path.join(os.path.dirname(output_path), "background.wav")
+            _extract_background(original_audio, bg_path, sr=TARGET_SR)
+            log.info("Background audio saved: %s", bg_path)
 
         dur_dub = get_audio_duration(work)
         mix_path = output_path + ".mix.wav"

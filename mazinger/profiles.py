@@ -1002,6 +1002,130 @@ def create_auto_clone_profile(
     return wav_path
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Keeping a run's voice so single segments can be re-dubbed later
+# ═══════════════════════════════════════════════════════════════════════════════
+
+REFERENCE_MIN_DURATION = 3.0
+REFERENCE_MAX_DURATION = 10.0
+
+
+def keep_voice_reference(
+    voice_sample: str,
+    ref_text: str | None,
+    output_dir: str,
+) -> tuple[str, str | None]:
+    """Copy a user-supplied voice sample (and its transcript) into *output_dir*.
+
+    Uploaded samples usually live in a temporary directory that is gone by
+    the time a segment is re-dubbed, so the project keeps its own copy.
+    Any previously kept reference is replaced.
+
+    Returns:
+        ``(voice_path, script_path)`` — *script_path* is ``None`` when there
+        is no transcript.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    ext = os.path.splitext(voice_sample)[1].lower() or ".wav"
+    dest = os.path.join(output_dir, f"voice{ext}")
+
+    if os.path.abspath(voice_sample) != os.path.abspath(dest):
+        for name in os.listdir(output_dir):
+            if name.startswith("voice."):
+                os.remove(os.path.join(output_dir, name))
+        shutil.copy2(voice_sample, dest)
+
+    script_path = os.path.join(output_dir, SCRIPT_FILENAME)
+    if ref_text and ref_text.strip():
+        with open(script_path, "w", encoding="utf-8") as fh:
+            fh.write(ref_text.strip())
+    else:
+        if os.path.exists(script_path):
+            os.remove(script_path)
+        script_path = None
+
+    log.info("Kept voice reference: %s", dest)
+    return dest, script_path
+
+
+def save_voice_instruct(instruct: str, path: str) -> str:
+    """Write an OmniVoice voice-design instruct string to *path*."""
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(instruct.strip())
+    return path
+
+
+def select_reference_segment(
+    segment_info: list[dict],
+    srt_entries: list[dict],
+    output_dir: str,
+    *,
+    min_duration: float = REFERENCE_MIN_DURATION,
+    max_duration: float = REFERENCE_MAX_DURATION,
+) -> tuple[str, str] | None:
+    """Promote one synthesized segment to a voice reference.
+
+    OmniVoice's auto-voice mode invents a voice per run without any reference
+    clip, so re-dubbing a single segment would come out in a different voice.
+    Picking one of the run's own segments as a cloning reference keeps later
+    re-dubs consistent with the rest of the dub.
+
+    The loudest segment whose duration lies within
+    [*min_duration*, *max_duration*] wins; when none does, the one whose
+    duration is closest to that range is used.  Silent segments are ignored.
+
+    Returns:
+        ``(voice_path, script_path)`` written into *output_dir*, or ``None``
+        when there is no usable segment.
+    """
+    import numpy as np
+    import soundfile as sf
+
+    texts = {str(e["idx"]): e["text"].strip() for e in srt_entries}
+
+    def _distance(dur: float) -> float:
+        if dur < min_duration:
+            return min_duration - dur
+        if dur > max_duration:
+            return dur - max_duration
+        return 0.0
+
+    candidates = [
+        seg for seg in segment_info
+        if seg.get("wav_path") and os.path.isfile(seg["wav_path"])
+        and texts.get(str(seg["idx"]))
+    ]
+    if not candidates:
+        return None
+
+    nearest = min(_distance(seg["actual_dur"]) for seg in candidates)
+    candidates = [seg for seg in candidates if _distance(seg["actual_dur"]) == nearest]
+
+    best: dict | None = None
+    best_rms = 1e-4  # below this a segment is treated as silence
+    for seg in candidates:
+        audio, _ = sf.read(seg["wav_path"], dtype="float32", always_2d=True)
+        rms = float(np.sqrt(np.mean(np.square(audio)))) if audio.size else 0.0
+        if rms > best_rms:
+            best, best_rms = seg, rms
+    if best is None:
+        return None
+
+    os.makedirs(output_dir, exist_ok=True)
+    voice_path = os.path.join(output_dir, "voice.wav")
+    script_path = os.path.join(output_dir, SCRIPT_FILENAME)
+    shutil.copy2(best["wav_path"], voice_path)
+    with open(script_path, "w", encoding="utf-8") as fh:
+        fh.write(texts[str(best["idx"])])
+
+    log.info(
+        "Voice reference promoted from segment %s (%.1fs) -> %s",
+        best["idx"], best["actual_dur"], output_dir,
+    )
+    return voice_path, script_path
+
+
 def fetch_profile(profile_name: str, cache_dir: str | None = None) -> tuple[str, str]:
     """Return ``(voice_sample_path, voice_script_path)`` for *profile_name*.
 

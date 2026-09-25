@@ -206,19 +206,24 @@ def test_logout_survives_missing_stored_token():
 
 # ── Studio wiring ───────────────────────────────────────────────────────────
 
-def test_studio_copies_stay_in_sync():
-    """The Colab copy under docs/notebooks must expose the same helpers."""
+def test_notebook_runs_the_packaged_studio():
+    """The Colab notebook imports Studio from the installed package.
+
+    It used to download a copy of these files from docs/notebooks/studio,
+    which drifted from the package; that copy is gone.
+    """
+    import json
     import pathlib
-    packaged = pathlib.Path("mazinger/studio/helpers.py").read_text(encoding="utf-8")
-    notebook = pathlib.Path("docs/notebooks/studio/helpers.py").read_text(encoding="utf-8")
-    assert notebook == packaged.replace(
-        "from mazinger.studio.constants import", "from constants import"
-    )
+    nb = json.loads(pathlib.Path("docs/notebooks/mazinger_studio.ipynb").read_text(encoding="utf-8"))
+    code = "\n".join("".join(c["source"]) for c in nb["cells"] if c["cell_type"] == "code")
+    assert "import mazinger.studio.app as studio" in code
+    assert "docs/notebooks/studio" not in code and "urlretrieve" not in code
+    assert "allowed_paths" in code
+    assert not pathlib.Path("docs/notebooks/studio").exists()
 
 
 @pytest.mark.parametrize("path", [
     "mazinger/studio/app.py",
-    "docs/notebooks/studio/app.py",
 ])
 def test_app_wires_the_login_buttons(path):
     import pathlib

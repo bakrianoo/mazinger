@@ -11,6 +11,7 @@ class ProjectPaths:
     Directory layout under ``<base_dir>/projects/<slug>/``::
 
         source/              downloaded video + extracted audio   (shared)
+                             + cached background stem and loudness
         source/youtube_subs/ subtitles downloaded from YouTube    (shared)
         transcription/       raw and processed SRT files          (shared)
         thumbnails/          extracted frames + metadata          (shared)
@@ -20,6 +21,8 @@ class ProjectPaths:
             subtitles/       final production-ready SRT
             tts/             synthesised audio segments + final output
             voice_profile/   cloned / generated voice reference
+            editor/          Editor session state and re-done segments
+            run.json         settings of the last completed dub
 
     When *target_language* is ``None`` the language-scoped paths fall back
     to the project root (legacy flat layout).
@@ -53,6 +56,14 @@ class ProjectPaths:
         self.tts_dir = os.path.join(_lang, "tts")
         self.tts_segments_dir = os.path.join(self.tts_dir, "segments")
         self.voice_profile_dir = os.path.join(_lang, "voice_profile")
+        self.editor_dir = os.path.join(_lang, "editor")
+
+        # Voice references kept so a single segment can be re-dubbed later
+        # in the same voice.  They live beside — never at — voice_profile/
+        # voice.wav, which the theme and auto-clone stages reuse as a cache.
+        self.voice_reference_dir = os.path.join(self.voice_profile_dir, "reference")
+        self.voice_instruct = os.path.join(self.voice_profile_dir, "instruct.txt")
+        self.omnivoice_auto_dir = os.path.join(self.voice_profile_dir, "omnivoice_auto")
 
         # Shared file paths
         self.video = os.path.join(self.source_dir, "video.mp4")
@@ -62,6 +73,7 @@ class ProjectPaths:
         self.source_raw_srt = os.path.join(self.transcription_dir, "source.raw.srt")
         self.source_lang = os.path.join(self.transcription_dir, "source.lang.txt")
         self.pre_validation_srt = os.path.join(self.transcription_dir, "source.PRE_VALIDATION.srt")
+        self.source_loudness = os.path.join(self.source_dir, "loudness.json")
         self.thumbs_meta = os.path.join(self.thumbnails_dir, "meta.json")
         self.description = os.path.join(self.analysis_dir, "description.json")
 
@@ -73,8 +85,16 @@ class ProjectPaths:
         self.final_srt = os.path.join(self.subtitles_dir, "translated.srt")
         self.final_audio = os.path.join(self.tts_dir, "dubbed.wav")
         self.final_video = os.path.join(self.tts_dir, "dubbed.mp4")
+        self.run_info = os.path.join(_lang, "run.json")
 
     # ------------------------------------------------------------------
+
+    def background_audio(self, sample_rate: int = 24_000) -> str:
+        """Cached background (non-vocal) stem of the source audio.
+
+        Shared by every language and reused while newer than ``audio.mp3``.
+        """
+        return os.path.join(self.source_dir, f"background.{sample_rate}.wav")
 
     def ensure_dirs(self) -> ProjectPaths:
         """Create all project sub-directories (idempotent)."""

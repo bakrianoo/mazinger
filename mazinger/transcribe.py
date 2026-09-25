@@ -1567,3 +1567,67 @@ def transcribe(
     log.info("SRT saved: %s (%d segments)", output_path, len(final_segments))
 
     return output_path
+
+
+def transcribe_clip(
+    audio_path: str,
+    start: float,
+    end: float,
+    *,
+    pad: float = 0.3,
+    **settings: Any,
+) -> str:
+    """Transcribe the ``[start, end]`` range of *audio_path* and return its text.
+
+    Used to re-transcribe a single segment.  The range is cut with ffmpeg,
+    widened by *pad* seconds on each side so words at the edges are not
+    clipped, and passed to :func:`transcribe` with ``skip_resegment=True``.
+    Recognised segments whose midpoint falls inside the padding belong to
+    the neighbouring segments and are dropped.
+
+    Parameters:
+        audio_path: Source audio (any format ffmpeg reads).
+        start, end: Range in seconds.
+        pad:        Extra audio included on each side, in seconds.
+        **settings: Passed to :func:`transcribe` (``method``, ``model``,
+                    ``language``, ``device`` …).
+
+    Returns:
+        The recognised text, segments joined with spaces (``""`` for silence).
+    """
+    import subprocess
+    import tempfile
+
+    from mazinger.srt import parse_file
+
+    if not os.path.exists(audio_path):
+        raise FileNotFoundError(f"Audio file not found: {audio_path}")
+    if end <= start:
+        raise ValueError(f"Empty range: start={start} end={end}")
+
+    clip_start = max(0.0, start - pad)
+    clip_end = end + pad
+    settings.pop("skip_resegment", None)
+
+    with tempfile.TemporaryDirectory(prefix="mazinger_clip_") as tmp:
+        clip_path = os.path.join(tmp, "clip.wav")
+        # -ss before -i seeks the input instead of decoding up to *start*.
+        subprocess.run(
+            [
+                "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                "-ss", f"{clip_start:.3f}", "-t", f"{clip_end - clip_start:.3f}",
+                "-i", audio_path, "-ac", "1", "-ar", "16000", clip_path,
+            ],
+            capture_output=True, check=True,
+        )
+        srt_path = os.path.join(tmp, "clip.srt")
+        transcribe(clip_path, srt_path, skip_resegment=True, **settings)
+        entries = parse_file(srt_path)
+
+    # Clip-relative bounds of the requested range.
+    lo, hi = start - clip_start, end - clip_start
+    texts = [
+        e["text"].strip() for e in entries
+        if lo <= (e["start"] + e["end"]) / 2 <= hi and e["text"].strip()
+    ]
+    return " ".join(texts)

@@ -716,7 +716,13 @@ def _run_full_dub(
                     or "translategemma"
                 )
 
-            paths = dubber.dub(**dub_kw)
+            from mazinger.gpu import gpu_lock, release_idle
+
+            # Waits for a running Editor operation, then frees the models
+            # the Editor keeps loaded so the dub has the whole GPU.
+            with gpu_lock.hold("a full dub", wait=True):
+                release_idle()
+                paths = dubber.dub(**dub_kw)
             result["paths"] = paths
 
         except Exception as exc:
