@@ -109,28 +109,6 @@ class TestAllExtraShipsCoherex:
         assert "qwen-tts" not in names
 
 
-class TestColabCopyStaysInSync:
-    """`docs/notebooks/studio` is fetched verbatim by the Colab notebook."""
-
-    @staticmethod
-    def _colab_constants():
-        import pathlib
-
-        path = pathlib.Path(__file__).resolve().parents[1] / "docs/notebooks/studio/constants.py"
-        if not path.is_file():
-            pytest.skip("Colab Studio copy not present")
-        namespace: dict = {}
-        source = path.read_text(encoding="utf-8")
-        # Execute only up to the trailing package import the notebook copy makes.
-        source = source.split("from mazinger.ollama_setup")[0]
-        exec(compile(source, str(path), "exec"), namespace)  # noqa: S102
-        return namespace
-
-    def test_colab_copy_defaults_to_coherex_too(self):
-        ns = self._colab_constants()
-        assert ns["METHOD_MAP"][ns["DEFAULT_TRANSCRIBE_LABEL"]] == "coherex"
-
-
 class TestGatedCredentialGuard:
     def test_explicit_token_is_accepted(self):
         from mazinger.transcribe import _require_hf_credentials

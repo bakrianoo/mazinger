@@ -17,7 +17,7 @@
 
 ---
 
-## 🚀 Get Started in 2 Steps
+## 🚀 Get Started
 
 **Prerequisites:** Python 3.10+ and `ffmpeg` on your `PATH` (`apt install ffmpeg` / `brew install ffmpeg`).
 
@@ -60,7 +60,7 @@ A local URL opens in your browser. Paste a video link, pick a voice, and click *
 | Cloud transcription (no GPU) | Deepgram Nova 3 — $200 free credit |
 | Voice-cloned TTS | Qwen3-TTS, OmniVoice (24 languages) |
 | Background-audio separation | Demucs |
-| Web UI | Gradio (Mazinger Studio) |
+| Web UI | Gradio (Mazinger Studio), with a chunk-level Editor for finished dubs |
 | Local LLM (optional) | Ollama (auto-installed by `mazinger web`) |
 
 > **CohereX needs a one-time Hugging Face sign-in** — the Cohere models are
@@ -70,6 +70,10 @@ A local URL opens in your browser. Paste a video link, pick a voice, and click *
 > needs neither.
 
 Need Chatterbox, MLX (Apple Silicon), or a lighter install? See the [Installation Guide](docs/installation.md) — `mazinger[all]` now bundles CohereX, which brings the pyannote stack with it (~50 extra packages).
+
+### 3. Fix the dub, chunk by chunk
+
+When a dub finishes, click **✏️ Open in Editor**, or pick any earlier dub in the **✏️ Editor** tab. Each dubbed chunk is listed with its original audio, transcription, translation, and dubbed audio. Correct a word, reword a line that runs long, move a boundary, split or merge chunks, re-dub only what changed, and click **Assemble** to rebuild the output. Nothing re-runs by itself: edits mark what is out of date, and you choose what to redo. See the [Editor guide](docs/editor.md).
 
 ---
 
@@ -220,6 +224,7 @@ See the [Pipeline Overview](docs/pipeline.md) for a diagram and the data flow be
 | [Voice Profiles](docs/voice-profiles.md) | Using, creating, uploading profiles |
 | [Subtitle Styling](docs/subtitle-styling.md) | Fonts, colors, positioning, RTL, Google Fonts |
 | [Configuration](docs/configuration.md) | Env vars, caching, tempo, LLM usage tracking |
+| [Editor](docs/editor.md) | Fix a finished dub chunk by chunk: edit, split, merge, re-dub, re-assemble |
 | [Project Structure](docs/project-structure.md) | Output directory layout |
 | [YouTube Cookies](docs/youtube-cookies.md) | Cookies for age-restricted / region-locked videos |
 

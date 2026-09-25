@@ -726,6 +726,133 @@ def translate_srt(
     return result
 
 
+def translate_chunk(
+    source_text: str,
+    *,
+    prev_ctx: list[str] | None = None,
+    next_ctx: list[str] | None = None,
+    duration: float,
+    description: dict | None = None,
+    client: OpenAI,
+    llm_model: str = "gpt-4.1",
+    source_language: str = "auto",
+    target_language: str = "English",
+    words_per_second: float | None = None,
+    duration_budget: float = DURATION_BUDGET,
+    translate_technical_terms: bool = False,
+    user_instructions: str = "",
+    video_meta: dict | None = None,
+    thumb_paths: list[dict] | None = None,
+    start: float | None = None,
+    usage_tracker: LLMUsageTracker | None = None,
+) -> str:
+    """Translate one chunk with the same prompt and word budget as :func:`translate_srt`.
+
+    Used to re-translate a single segment after its source text was edited.
+
+    Parameters:
+        source_text:  Source-language text of the chunk.
+        prev_ctx:     Source texts of the preceding chunks, oldest first.
+                      Sent as reference context only.
+        next_ctx:     Source texts of the following chunks.
+        duration:     Length of the chunk's time slot in seconds; sets the
+                      word budget.
+        description:  Content description dict (``keywords``, ``keypoints``,
+                      ``summary`` …), as for :func:`translate_srt`.
+        words_per_second: Target speech rate.  When ``None``, estimated from
+                      this chunk the same way :func:`translate_srt` estimates
+                      it for a whole file.
+        thumb_paths, start: Thumbnail metadata and the chunk's start time;
+                      screenshots inside the chunk's time range are attached.
+
+    Returns:
+        The translated text.
+
+    Raises:
+        ValueError: if *source_text* is empty or no translation could be
+            parsed from the reply.  The source text is never returned in
+            place of a translation.
+    """
+    if not source_text or not source_text.strip():
+        raise ValueError("Nothing to translate: the source text is empty")
+    source_language = resolve_source_language(source_language)
+    target_language = resolve_language(target_language)
+    description = description or {}
+    prev_ctx = [t for t in (prev_ctx or []) if t and t.strip()]
+    next_ctx = [t for t in (next_ctx or []) if t and t.strip()]
+
+    # Number the context around the chunk so the model sees one sequence.
+    main_idx = str(len(prev_ctx) + 1)
+    core = [(main_idx, 0.0, float(duration), source_text.strip())]
+    before = [(str(i), 0.0, 0.0, t) for i, t in enumerate(prev_ctx, 1)]
+    after = [(str(int(main_idx) + i), 0.0, 0.0, t) for i, t in enumerate(next_ctx, 1)]
+
+    if words_per_second is None:
+        words_per_second = estimate_wps(core, target_language)
+
+    described_dialect = description.get("dialect", "")
+    if source_language == "auto" and described_dialect:
+        source_language = described_dialect
+
+    keywords = description.get("keywords", [])
+    keypoints = description.get("keypoints", [])
+    system_prompt = _build_system_prompt(
+        keywords, keypoints, target_language,
+        source_language=source_language,
+        words_per_second=words_per_second,
+        duration_budget=duration_budget,
+        translate_technical_terms=translate_technical_terms,
+        summary=description.get("summary", ""),
+        dialect=description.get("dialect", ""),
+        tone=description.get("tone", ""),
+        speakers=description.get("speakers"),
+        languages=description.get("languages"),
+        user_instructions=user_instructions,
+    )
+
+    thumbs: list[dict] = []
+    if thumb_paths and start is not None:
+        thumbs = _find_thumbnails_for_range(thumb_paths, start, start + duration)
+
+    msgs = _build_messages(
+        system_prompt,
+        _blocks_to_json_entries(core, words_per_second, duration_budget),
+        thumbs, keypoints, keywords,
+        _blocks_to_context_text(before) if before else "",
+        _blocks_to_context_text(after) if after else "",
+        target_language=target_language,
+        video_meta=video_meta,
+    )
+    resp = client.chat.completions.create(
+        model=llm_model, temperature=0.3, messages=msgs,
+        repeat_penalty=1.2,
+        top_p=0.9,
+        num_predict=8000,
+        frequency_penalty=0.3,
+    )
+    if usage_tracker is not None:
+        usage_tracker.record("translate", llm_model, resp)
+
+    raw_content = (resp.choices[0].message.content or "").strip()
+    # An empty placeholder makes the parser's "keep the original" fallback
+    # come back empty, so a failed parse is detectable.
+    parsed = _parse_translation_response(raw_content, [(main_idx, 0.0, float(duration), "")])
+    text = parsed[0][3].strip() if parsed else ""
+    if not text:
+        # Weak models sometimes renumber a lone entry; one answer is unambiguous.
+        try:
+            items = json_repair.loads(raw_content)
+        except Exception:  # noqa: BLE001
+            items = None
+        if isinstance(items, dict):
+            items = [items]
+        if isinstance(items, list) and len(items) == 1 and isinstance(items[0], dict):
+            text = _clean_llm_text(str(items[0].get("text", "")))
+    if not text:
+        raise ValueError(f"Could not parse a translation from the model reply: {raw_content[:200]!r}")
+    return text
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Simple per-segment translation (template-based, e.g. for `translategemma`)
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -817,6 +944,34 @@ def _strip_simple_translation(reply: str) -> str:
         text, flags=re.I,
     )
     return text.strip()
+
+
+def translate_text_simple(
+    text: str,
+    client: OpenAI,
+    *,
+    llm_model: str = "translategemma",
+    source_language: str = "English",
+    target_language: str = "English",
+    usage_tracker: LLMUsageTracker | None = None,
+    temperature: float = 0.1,
+) -> str:
+    """Translate one text with :data:`SIMPLE_TRANSLATION_TEMPLATE`.
+
+    The per-entry step of :func:`translate_srt_simple`.  Takes canonical
+    language names (not ``auto``).  Returns ``""`` when the reply is empty
+    after cleanup; errors from the client propagate.
+    """
+    prompt = _build_simple_prompt(text.strip(), source_language, target_language)
+    resp = client.chat.completions.create(
+        model=llm_model,
+        temperature=temperature,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    if usage_tracker is not None:
+        usage_tracker.record("translate", llm_model, resp)
+    reply = resp.choices[0].message.content or ""
+    return _strip_simple_translation(_clean_llm_text(reply))
 
 
 # Maximum source-block duration before pre-splitting kicks in for the
@@ -1002,16 +1157,15 @@ def translate_srt_simple(
             translated.append((idx, start, end, original))
             continue
 
-        prompt = _build_simple_prompt(original, src, tgt)
         try:
-            resp = client.chat.completions.create(
-                model=llm_model,
+            cleaned = translate_text_simple(
+                original, client,
+                llm_model=llm_model,
+                source_language=src,
+                target_language=tgt,
+                usage_tracker=usage_tracker,
                 temperature=temperature,
-                messages=[{"role": "user", "content": prompt}],
             )
-            if usage_tracker is not None:
-                usage_tracker.record("translate", llm_model, resp)
-            reply = resp.choices[0].message.content or ""
         except Exception as exc:  # noqa: BLE001
             log.warning(
                 "Simple translation failed for entry %s: %s — keeping original",
@@ -1020,7 +1174,6 @@ def translate_srt_simple(
             translated.append((idx, start, end, original))
             continue
 
-        cleaned = _strip_simple_translation(_clean_llm_text(reply))
         if not cleaned:
             log.warning(
                 "Empty translation for entry %s — keeping original", idx,

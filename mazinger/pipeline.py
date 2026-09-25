@@ -58,6 +58,82 @@ class MazingerDubber:
             think=self._llm_think,
         )
 
+    def _save_run_info(
+        self,
+        proj: ProjectPaths,
+        *,
+        source_language: str,
+        target_language: str,
+        transcription: dict,
+        translation_source_srt: str,
+        translation: dict,
+        tts: dict,
+        voice_kind: str,
+        voice_theme: str | None,
+        voice_sample: str | None,
+        voice_instruct: str | None,
+        segmentation: dict,
+        assembly: dict,
+        output_type: str,
+        subtitle_style: Any,
+        subtitle_source: str,
+    ) -> str:
+        """Write ``run.json`` — see :mod:`mazinger.runinfo`."""
+        import dataclasses
+        from mazinger.runinfo import project_relpath, save_run_info
+
+        rel = lambda p: project_relpath(proj, p)  # noqa: E731
+
+        detected = None
+        if os.path.exists(proj.source_lang):
+            with open(proj.source_lang, encoding="utf-8") as fh:
+                detected = fh.read().strip() or None
+
+        if voice_kind == "sample":
+            script = os.path.join(proj.voice_reference_dir, "script.txt")
+        elif voice_kind == "omnivoice-auto":
+            voice_sample = os.path.join(proj.omnivoice_auto_dir, "voice.wav")
+            script = os.path.join(proj.omnivoice_auto_dir, "script.txt")
+        elif voice_kind == "theme":
+            script = os.path.join(proj.voice_profile_dir, "script.txt")
+        else:
+            script = None
+        voice = dict(
+            kind=voice_kind,
+            theme=voice_theme,
+            sample=rel(voice_sample) if voice_sample and os.path.isfile(voice_sample) else None,
+            script=rel(script) if script and os.path.isfile(script) else None,
+            instruct=voice_instruct,
+        )
+
+        style = dataclasses.asdict(subtitle_style) if subtitle_style is not None else None
+        if subtitle_source not in ("translated", "original"):
+            subtitle_source = rel(subtitle_source)
+
+        return save_run_info(proj, dict(
+            slug=proj.slug,
+            target_language=target_language,
+            source_language=source_language,
+            detected_source_language=detected,
+            transcription=transcription,
+            translation_source_srt=rel(translation_source_srt),
+            llm=dict(
+                model=self.llm_model,
+                base_url=self._base_url,
+                think=self._llm_think,
+            ),
+            translation=translation,
+            tts=tts,
+            voice=voice,
+            segmentation=segmentation,
+            assembly=assembly,
+            output=dict(
+                output_type=output_type,
+                subtitle_style=style,
+                subtitle_source=subtitle_source,
+            ),
+        ))
+
     # ------------------------------------------------------------------
     #  Public API
     # ------------------------------------------------------------------
@@ -226,17 +302,20 @@ class MazingerDubber:
 
         # -- Resolve voice (theme / profile / explicit sample+script) -----
         _omnivoice_instruct: str | None = None
+        _voice_kind = "sample"  # recorded in run.json; refined below
         if voice_theme and tts_engine == "omnivoice" and not (voice_sample and voice_script):
             # OmniVoice has its own voice-design mode via ``instruct`` —
             # no need to generate a Qwen reference clip.
             from mazinger.profiles import get_theme_instruct
             _omnivoice_instruct = get_theme_instruct(voice_theme, tts_language)
+            _voice_kind = "theme-instruct"
             log.info(
                 "OmniVoice voice-design theme %s / %s -> instruct=%r",
                 voice_theme, tts_language, _omnivoice_instruct,
             )
         elif voice_theme and not (voice_sample and voice_script):
             from mazinger.profiles import generate_profile
+            _voice_kind = "theme"
             profile_dir = proj.voice_profile_dir
             profile_wav = os.path.join(profile_dir, "voice.wav")
             if os.path.isfile(profile_wav):
@@ -250,6 +329,8 @@ class MazingerDubber:
                 )
 
         auto_clone = not voice_sample and not voice_script and not _omnivoice_instruct
+        if auto_clone:
+            _voice_kind = "omnivoice-auto" if tts_engine == "omnivoice" else "auto-clone"
 
         if force_reset:
             skip_existing = False
@@ -266,6 +347,21 @@ class MazingerDubber:
                     ref_text = fh.read().strip()
             else:
                 ref_text = voice_script.strip()
+
+        # -- Keep the voice so single segments can be re-dubbed later ------
+        # Themes and auto-clone already live in the project; a supplied
+        # sample may sit in a temp dir that will be gone by then.
+        if _voice_kind == "sample" and voice_sample:
+            from mazinger.profiles import keep_voice_reference
+            try:
+                voice_sample, _ = keep_voice_reference(
+                    voice_sample, ref_text, proj.voice_reference_dir,
+                )
+            except OSError as exc:
+                log.warning("Could not keep a copy of the voice sample: %s", exc)
+        elif _voice_kind == "theme-instruct":
+            from mazinger.profiles import save_voice_instruct
+            save_voice_instruct(_omnivoice_instruct, proj.voice_instruct)
 
         # 1. Acquire source audio ----------------------------------------
         is_local_audio = not is_remote and download.is_audio_file(source)
@@ -433,6 +529,14 @@ class MazingerDubber:
                 with open(proj.reviewed_srt, "w", encoding="utf-8") as fh:
                     fh.write(source_srt_text)
 
+        # The SRT that is actually translated — the Editor maps its
+        # transcription text from this file.
+        translation_source_srt = (
+            proj.reviewed_srt
+            if asr_review and os.path.exists(proj.reviewed_srt)
+            else source_srt_for_pipeline
+        )
+
         # -- Auto-clone voice from source audio ---------------------------
         if auto_clone and tts_engine != "omnivoice":
             # For Qwen/Chatterbox/MLX: extract a voice sample from the source
@@ -579,6 +683,15 @@ class MazingerDubber:
         )
         tts.unload_model(voice_prompt, force=True)
 
+        # 7b. OmniVoice auto-voice has no reference clip; promote one of
+        # this run's segments so later single-segment re-dubs match it.
+        if _voice_kind == "omnivoice-auto":
+            from mazinger.profiles import select_reference_segment
+            try:
+                select_reference_segment(segment_info, srt_entries, proj.omnivoice_auto_dir)
+            except Exception as exc:  # noqa: BLE001 — never block the pipeline
+                log.warning("Could not keep an OmniVoice voice reference: %s", exc)
+
         # 8. Assemble final audio ----------------------------------------
         assemble.assemble_timeline(
             segment_info, original_duration, proj.final_audio,
@@ -594,6 +707,8 @@ class MazingerDubber:
                 loudness_match=loudness_match,
                 mix_background=mix_background,
                 background_volume=background_volume,
+                background_cache=proj.background_audio(assemble.TARGET_SR),
+                loudness_cache=proj.source_loudness,
             )
 
         drift = abs(get_audio_duration(proj.final_audio) - original_duration)
@@ -625,6 +740,65 @@ class MazingerDubber:
                 )
             else:
                 assemble.mux_video(proj.video, proj.final_audio, proj.final_video)
+
+        # 9b. Record the settings so single stages can be re-done later ---
+        tts_model_used = {
+            "chatterbox": chatterbox_model,
+            "mlx": mlx_model,
+            "omnivoice": omnivoice_model,
+        }.get(tts_engine, tts_model_name)
+        try:
+            self._save_run_info(
+                proj,
+                source_language=source_language,
+                target_language=target_language,
+                transcription=dict(
+                    method=transcribe_method,
+                    model=whisper_model,
+                    mlx_whisper_model=mlx_whisper_model,
+                    beam_size=beam_size,
+                    vad_method=vad_method,
+                    use_resegmented=use_resegmented,
+                ),
+                translation_source_srt=translation_source_srt,
+                translation=dict(
+                    translation_model=translation_model,
+                    words_per_second=words_per_second,
+                    duration_budget=duration_budget,
+                    translate_technical_terms=translate_technical_terms,
+                    user_instructions=user_instructions,
+                ),
+                tts=dict(
+                    engine=tts_engine,
+                    model=tts_model_used,
+                    dtype=tts_dtype,
+                    language=tts_language,
+                    chatterbox_exaggeration=chatterbox_exaggeration,
+                    chatterbox_cfg=chatterbox_cfg,
+                ),
+                voice_kind=_voice_kind,
+                voice_theme=voice_theme,
+                voice_sample=voice_sample,
+                voice_instruct=_omnivoice_instruct,
+                segmentation=dict(
+                    segment_mode=effective_mode,
+                    min_segment_duration=min_segment_duration,
+                    max_segment_duration=max_segment_duration,
+                ),
+                assembly=dict(
+                    tempo_mode=tempo_mode,
+                    fixed_tempo=fixed_tempo,
+                    max_tempo=max_tempo,
+                    loudness_match=loudness_match,
+                    mix_background=mix_background,
+                    background_volume=background_volume,
+                ),
+                output_type=output_type,
+                subtitle_style=subtitle_style,
+                subtitle_source=subtitle_source,
+            )
+        except Exception as exc:  # noqa: BLE001 — the dub itself succeeded
+            log.warning("Could not save run settings: %s", exc)
 
         # 10. LLM usage report -------------------------------------------
         if usage_tracker.records:

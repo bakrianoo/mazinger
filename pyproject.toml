@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mazinger"
-version = "2.1.2"
+version = "2.3.0"
 description = "End-to-end video dubbing pipeline: transcribe, translate, and voice-clone."
 readme = "README.md"
 license = {text = "MIT"}
@@ -159,7 +159,7 @@ all-mlx = [
 ]
 # Gradio web UI
 web = [
-    "gradio>=4.0",
+    "gradio>=5.0",  
     # Powers the Studio's "Sign in with Hugging Face" button.  Older releases
     # lack the device-code flow; the UI falls back to a token box there.
     "huggingface-hub>=0.30",
