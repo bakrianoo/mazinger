@@ -29,7 +29,7 @@ Fetches a video from a URL using yt-dlp (supports YouTube, Vimeo, and hundreds o
 **Inputs:** URL or local file path
 **Outputs:** `source/video.mp4`, `source/audio.mp3`
 
-Supports quality selection (`low`, `medium`, `high`, or a numeric height like `1080`) and browser cookie files for authenticated downloads.
+Supports quality selection (`low`, `medium`, `high`, or a numeric resolution like `1080`, measured on the short side of the frame so `720` gives 1280×720 for landscape video and 720×1280 for vertical Shorts) and browser cookie files for authenticated downloads.
 
 Optional `--start` / `--end` flags (or `start`/`end` in the Python API) slice the downloaded media to a time range before any further processing. The standalone `slice` command provides this as an independent operation.
 
