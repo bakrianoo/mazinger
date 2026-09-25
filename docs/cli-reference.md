@@ -30,7 +30,7 @@ mazinger dub <source> [options]
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--slug` | auto-generated | Project slug (directory name) |
-| `--quality` | best available | Video quality: `low`, `medium`, `high`, or numeric height (e.g., `1080`) |
+| `--quality` | best available | Video quality: `low`, `medium`, `high`, or a numeric resolution (e.g., `1080`) — measured on the short side, so it also fits vertical Shorts |
 | `--cookies-from-browser` | — | Browser name for yt-dlp cookie extraction |
 | `--cookies` | — | Path to a Netscape cookies.txt file |
 | `--clone-profile` | — | Voice profile name from HuggingFace or local directory path |

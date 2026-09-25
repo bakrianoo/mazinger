@@ -50,29 +50,34 @@ def resolve_quality(quality: str | None) -> int | None:
         )
 
 
-def _build_format_string(max_height: int | None) -> str:
-    """Return a yt-dlp ``format`` string constrained to *max_height*.
+def _build_format_opts(max_height: int | None) -> dict[str, Any]:
+    """Return yt-dlp format options that cap quality at *max_height*.
 
-    Falls back to the best available stream when the requested height is
-    unavailable, ensuring a download always succeeds.
+    "720p" names the *short* side of the frame: 1280x720 for landscape, but
+    720x1280 for a vertical Short.  A ``[height<=720]`` filter gets vertical
+    video wrong — it rejects every rendition above 360x640 — so the cap is
+    expressed through ``format_sort`` instead, whose ``res`` field yt-dlp
+    measures on the smaller dimension.  ``res:N`` prefers the largest
+    rendition at or below *N* and otherwise the smallest above it, so a
+    download always succeeds.
     """
-    if max_height is None:
-        return "bestvideo*+bestaudio/best"
-    return (
-        f"bestvideo[height<={max_height}]+bestaudio"
-        f"/best[height<={max_height}]"
-        f"/bestvideo+bestaudio/best"
-    )
+    opts: dict[str, Any] = {"format": "bestvideo*+bestaudio/best"}
+    if max_height is not None:
+        opts["format_sort"] = [f"res:{max_height}"]
+    return opts
 
 
-def _probe_video_height(path: str) -> int | None:
-    """Return the pixel height of the first video stream, or ``None``."""
+def _probe_video_resolution(path: str) -> int | None:
+    """Return the short side of the first video stream in pixels, or ``None``.
+
+    The short side is what a "720p" label refers to regardless of orientation.
+    """
     try:
         result = subprocess.run(
             [
                 "ffprobe", "-v", "error",
                 "-select_streams", "v:0",
-                "-show_entries", "stream=height",
+                "-show_entries", "stream=width,height",
                 "-of", "csv=p=0",
                 path,
             ],
@@ -80,7 +85,8 @@ def _probe_video_height(path: str) -> int | None:
             text=True,
             check=True,
         )
-        return int(result.stdout.strip())
+        width, height = (int(v) for v in result.stdout.strip().split(",")[:2])
+        return min(width, height)
     except (subprocess.CalledProcessError, ValueError):
         return None
 
@@ -621,10 +627,10 @@ def download_video(
         return output_path
 
     max_height = resolve_quality(quality)
-    fmt = _build_format_string(max_height)
+    format_opts = _build_format_opts(max_height)
     log.info(
-        "Requesting quality=%s (max_height=%s, format=%s)",
-        quality or "medium", max_height, fmt,
+        "Requesting quality=%s (max_height=%s, %s)",
+        quality or "medium", max_height, format_opts,
     )
 
     url = _strip_playlist_params(url)
@@ -636,7 +642,7 @@ def download_video(
 
     def _build(clients: tuple[str, ...]) -> dict[str, Any]:
         return {
-            "format": fmt,
+            **format_opts,
             "merge_output_format": "mp4",
             "outtmpl": output_path,
             **_yt_dlp_common_opts(clients),
@@ -651,7 +657,7 @@ def download_video(
 
     # -- Warn when actual resolution differs from requested ---------------
     if max_height is not None:
-        actual = _probe_video_height(output_path)
+        actual = _probe_video_resolution(output_path)
         if actual is not None and actual != max_height:
             if actual > max_height:
                 log.warning(
