@@ -316,8 +316,60 @@ class _StreamingOpenAIChatCompletions:
     # Map portable kwarg names to their OpenAI equivalents.
     _KWARG_MAP = {"num_predict": "max_tokens"}
 
+    # Error codes OpenAI returns when a model rejects a sampling parameter.
+    # Reasoning models (o-series, GPT-5) refuse ``max_tokens`` outright and
+    # only accept the default ``temperature`` / ``top_p`` / penalties.
+    _REJECTED_PARAM_CODES = frozenset({"unsupported_parameter", "unsupported_value"})
+
+    # model -> kwargs the provider has rejected for it, shared across clients
+    # so each pipeline stage does not have to rediscover them.
+    _rejected: dict[str, set[str]] = {}
+    _rejected_lock = threading.Lock()
+
     def __init__(self, inner) -> None:
         self._inner = inner
+
+    @classmethod
+    def _rejected_param(cls, exc: Exception, kwargs: dict) -> str | None:
+        """Return the kwarg a 400 error says the model does not support."""
+        if getattr(exc, "status_code", None) != 400:
+            return None
+        body = getattr(exc, "body", None)
+        if not isinstance(body, dict):
+            return None
+        if body.get("code") not in cls._REJECTED_PARAM_CODES:
+            return None
+        param = body.get("param")
+        return param if param in kwargs else None
+
+    def _create_adaptive(self, **kwargs):
+        """Call ``create()``, dropping sampling kwargs the model rejects.
+
+        These kwargs are tuning hints, and a model that refuses them should
+        still run with its defaults.  ``max_tokens`` is dropped rather than
+        renamed to ``max_completion_tokens``: for reasoning models that limit
+        also counts hidden reasoning tokens, so the small caps the pipeline
+        uses would often leave no room for the visible answer.
+        """
+        model = kwargs.get("model", "")
+        with self._rejected_lock:
+            for key in self._rejected.get(model, ()):
+                kwargs.pop(key, None)
+
+        while True:
+            try:
+                return self._inner.create(**kwargs)
+            except Exception as exc:
+                param = self._rejected_param(exc, kwargs)
+                if param is None or param in ("model", "messages"):
+                    raise
+                log.warning(
+                    "Model %s does not support '%s' — retrying without it",
+                    model, param,
+                )
+                kwargs.pop(param)
+                with self._rejected_lock:
+                    self._rejected.setdefault(model, set()).add(param)
 
     def _normalise_kwargs(self, kwargs: dict) -> dict:
         """Translate portable kwargs to OpenAI names, drop unsupported ones."""
@@ -336,11 +388,11 @@ class _StreamingOpenAIChatCompletions:
 
         callback = get_stream_callback()
         if not callback:
-            return self._inner.create(**kwargs)
+            return self._create_adaptive(**kwargs)
 
         # Force streaming on, collect full response for caller
         kwargs["stream"] = True
-        stream_resp = self._inner.create(**kwargs)
+        stream_resp = self._create_adaptive(**kwargs)
 
         content_parts: list[str] = []
         role = "assistant"
