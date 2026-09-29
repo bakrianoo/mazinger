@@ -99,13 +99,13 @@ The LLM receives the content description for context and processes subtitles in 
 
 Translates the SRT into the target language. Subtitles are processed in batches of 24 entries with an 8-entry overlap window for context continuity.
 
-Each entry gets a word-count target calculated as:
+Each entry gets a length target calculated as:
 
 ```
-max_words = duration_seconds × words_per_second × duration_budget
+target = duration_seconds × words_per_second × duration_budget
 ```
 
-The defaults are 2.0 words/second and 0.80 budget (80% of available time). This prevents the translated text from being longer than what TTS can speak within the original timing.
+By default `words_per_second` is the TTS speech rate of the target language (e.g. 3.2 for English), and the budget is 0.85 (85% of available time). Chinese and Japanese are budgeted in characters per second instead of words. The target is a soft limit: the model is told to stay at or under it without dropping content, and assembly speeds up small overruns. Entries that come back missing or unparseable are retried once before the original text is kept.
 
 Thumbnails and the content description are included in the LLM prompt so translations stay grounded in what is visually on screen.
 
@@ -140,6 +140,10 @@ Each segment is saved individually (`seg_0001.wav`, `seg_0002.wav`, ...) so inte
 
 **Inputs:** `subtitles/translated.srt`, voice sample + optional transcript (or `--voice-theme`)
 **Outputs:** `tts/segments/seg_NNNN.wav`, optionally `voice_profile/voice.wav` and `voice_profile/script.txt`
+
+### 8b. Fit check
+
+Compares each segment's speech with the time it may occupy (up to the next segment). Lines that would need more than 1.15× speed-up are sent to the LLM in one batch to be rewritten shorter — tighter phrasing, same content, never more than 30% shorter per round — and re-synthesised. A rewrite is kept only if its audio is actually shorter, and `subtitles/translated.srt` is updated to the spoken text. At most two rounds run, and only overflowing lines cost time. Disable with `--no-fit-check` (CLI), `fit_check=False` (Python), or the **Fit check** box in Studio's Audio tab.
 
 ### 9. Assemble
 

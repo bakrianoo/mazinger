@@ -140,6 +140,7 @@ class TestRunRecord:
         assert info["tts"]["language"] == "Spanish"
         assert info["assembly"] == {
             "tempo_mode": "fixed", "fixed_tempo": 1.1, "max_tempo": 1.3,
+            "fit_check": True, "fit_max_ratio": 1.15, "fit_rounds": 2,
             "loudness_match": True, "mix_background": True, "background_volume": 0.2,
         }
         assert info["translation"]["words_per_second"] == 2.5

@@ -538,6 +538,92 @@ footer {{ display: none !important; }}
     overflow-y: auto !important;
 }}
 
+/* ── Batch progress (several sources in one run) ────────────────── */
+.gradio-container .batch-progress {{
+    background: var(--mz-surface);
+    border: 1px solid var(--mz-line);
+    border-radius: 12px;
+    padding: 0.9rem 1rem;
+    color: var(--mz-text);
+}}
+.gradio-container .batch-progress .bp-head {{
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--mz-text-dim);
+    margin-bottom: 0.5rem;
+}}
+.gradio-container .batch-progress .bp-track {{
+    height: 8px;
+    border-radius: 999px;
+    background: var(--mz-sunken);
+    overflow: hidden;
+}}
+.gradio-container .batch-progress .bp-fill {{
+    height: 100%;
+    background: var(--mz-verdigris);
+    border-radius: 999px;
+    transition: width 0.4s ease;
+}}
+.gradio-container .batch-progress .bp-fill.bp-has-failed {{
+    background: linear-gradient(to right, var(--mz-verdigris), var(--mz-sandy));
+}}
+.gradio-container .batch-progress .bp-list {{
+    list-style: none;
+    margin: 0.75rem 0 0;
+    padding: 0;
+    max-height: 260px;
+    overflow-y: auto;
+}}
+.gradio-container .batch-progress .bp-item {{
+    display: flex;
+    align-items: flex-start;
+    gap: 0.6rem;
+    padding: 0.4rem 0.2rem;
+    border-top: 1px solid var(--mz-line-soft);
+    font-size: 0.82rem;
+}}
+.gradio-container .batch-progress .bp-icon {{ width: 1rem; text-align: center; flex: none; }}
+.gradio-container .batch-progress .bp-num {{
+    color: var(--mz-text-muted);
+    font-variant-numeric: tabular-nums;
+    min-width: 1.5rem;
+    flex: none;
+}}
+.gradio-container .batch-progress .bp-body {{
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    flex: 1;
+}}
+.gradio-container .batch-progress .bp-name,
+.gradio-container .batch-progress .bp-detail {{
+    overflow-wrap: anywhere;
+}}
+.gradio-container .batch-progress .bp-detail {{
+    color: var(--mz-text-muted);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.74rem;
+}}
+.gradio-container .batch-progress .bp-state {{
+    flex: none;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--mz-text-muted);
+}}
+.gradio-container .batch-progress .bp-running .bp-icon,
+.gradio-container .batch-progress .bp-running .bp-state {{ color: var(--mz-tuscan); }}
+.gradio-container .batch-progress .bp-running .bp-name {{ font-weight: 600; }}
+.gradio-container .batch-progress .bp-done .bp-icon,
+.gradio-container .batch-progress .bp-done .bp-state {{ color: {VERDIGRIS_LIGHT}; }}
+.gradio-container .batch-progress .bp-failed .bp-icon,
+.gradio-container .batch-progress .bp-failed .bp-state,
+.gradio-container .batch-progress .bp-failed .bp-detail {{ color: {PEACH_LIGHT}; }}
+.gradio-container .batch-progress .bp-pending {{ color: var(--mz-text-dim); }}
+
 /* ── Accordions ─────────────────────────────────────────────────── */
 .gradio-container .gr-accordion {{
     background: var(--mz-surface) !important;

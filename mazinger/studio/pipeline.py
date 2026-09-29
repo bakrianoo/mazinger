@@ -66,30 +66,160 @@ def _prepare_ollama(ollama_model, extra_models, empty):
     return False
 
 
-def _resolve_source(source_type, url, uploaded_file, local_path=None):
+def _parse_lines(text):
+    """One entry per line; blank lines and ``#`` comments are dropped, repeats kept once."""
+    seen = []
+    for line in (text or "").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and line not in seen:
+            seen.append(line)
+    return seen
+
+
+def _check_local_path(path):
+    if not os.path.isfile(path):
+        return f"File not found: {path}"
+    from mazinger.download import is_audio_file, is_video_file
+    if not is_audio_file(path) and not is_video_file(path):
+        return (
+            f"Unsupported file type: {os.path.splitext(path)[1] or '(no extension)'} ({path}). "
+            "Supported: mp4 mkv avi mov webm flv wmv ts m2ts mp3 wav flac aac ogg m4a wma opus"
+        )
+    return None
+
+
+def _resolve_sources(source_type, url, uploaded_files, local_path=None):
+    """Return ``(sources, error)`` — every source is validated before any run starts."""
     if source_type == "YouTube URL":
-        if not url or not url.strip():
+        urls = _parse_lines(url)
+        if not urls:
             return None, "❌ Please enter a video URL."
-        return url.strip(), None
+        return urls, None
     if source_type == "Local Path":
-        path = (local_path or "").strip()
-        if not path:
+        paths = _parse_lines(local_path)
+        if not paths:
             return None, "❌ Please enter a local file path."
-        if not os.path.isfile(path):
-            return None, f"❌ File not found: {path}"
-        from mazinger.download import is_audio_file, is_video_file
-        if not is_audio_file(path) and not is_video_file(path):
-            return None, (
-                f"❌ Unsupported file type: {os.path.splitext(path)[1] or '(no extension)'}. "
-                "Supported: mp4 mkv avi mov webm flv wmv ts m2ts mp3 wav flac aac ogg m4a wma opus"
-            )
-        return path, None
-    if not uploaded_file:
+        problems = [p for p in map(_check_local_path, paths) if p]
+        if problems:
+            return None, "❌ " + "\n❌ ".join(problems)
+        return paths, None
+    if isinstance(uploaded_files, (str, os.PathLike)) or (
+        uploaded_files and not isinstance(uploaded_files, (list, tuple))
+    ):
+        uploaded_files = [uploaded_files]
+    files = [getattr(f, "name", f) for f in (uploaded_files or []) if f]
+    if not files:
         return None, "❌ Please upload a video or audio file."
-    return uploaded_file, None
+    return files, None
 
 
-def _resolve_llm(is_ollama, ollama_model, openai_key, api_base_url, llm_model):
+# ═══════════════════════════════════════════════════════════════════════
+#  Batch runs (several sources, one after another)
+# ═══════════════════════════════════════════════════════════════════════
+
+def _source_label(source):
+    source = str(source)
+    if "://" in source:
+        return source
+    return os.path.basename(source) or source
+
+
+_BATCH_ICONS = {"pending": "○", "running": "◐", "done": "✓", "failed": "✕"}
+
+
+def _batch_progress_html(items):
+    """Overall progress bar plus one row per source, for the ``gr.HTML`` panel."""
+    from html import escape
+
+    total = len(items)
+    done = sum(it["state"] == "done" for it in items)
+    failed = sum(it["state"] == "failed" for it in items)
+    finished = done + failed
+    pct = round(100 * finished / total) if total else 0
+
+    head = f"{finished} of {total} finished"
+    if failed:
+        head += f" · {failed} failed"
+
+    rows = []
+    for n, it in enumerate(items, 1):
+        detail = (
+            f'<span class="bp-detail">{escape(it["detail"])}</span>' if it.get("detail") else ""
+        )
+        rows.append(
+            f'<li class="bp-item bp-{it["state"]}">'
+            f'<span class="bp-icon" aria-hidden="true">{_BATCH_ICONS[it["state"]]}</span>'
+            f'<span class="bp-num">{n}</span>'
+            f'<span class="bp-body"><span class="bp-name">{escape(it["name"])}</span>{detail}</span>'
+            f'<span class="bp-state">{it["state"]}</span>'
+            "</li>"
+        )
+
+    return (
+        '<div class="batch-progress">'
+        f'<div class="bp-head"><span>Batch · {head}</span><span>{pct}%</span></div>'
+        f'<div class="bp-track" role="progressbar" aria-valuemin="0" aria-valuemax="{total}" '
+        f'aria-valuenow="{finished}" aria-label="Batch progress">'
+        f'<div class="bp-fill{" bp-has-failed" if failed else ""}" style="width:{pct}%"></div></div>'
+        f'<ol class="bp-list">{"".join(rows)}</ol>'
+        "</div>"
+    )
+
+
+def _run_batch(sources, run_one):
+    """Run ``run_one(source)`` for each source in turn; a failed source does not stop the rest.
+
+    ``run_one`` yields the single-run 6-tuple; this yields it with a batch-aware
+    status and log plus the progress HTML as a 7th element.  The results panel
+    ends on the last source that succeeded.
+    """
+    total = len(sources)
+    items = [{"name": _source_label(s), "state": "pending", "detail": ""} for s in sources]
+    past_logs = []
+    last_ok = (None, None, None)
+    llm = ""
+
+    for i, source in enumerate(sources):
+        item = items[i]
+        item["state"] = "running"
+        tag = f"[{i + 1}/{total}] {item['name']}"
+        header = f"═══ {tag} ═══"
+        out = ("⏳ Starting…", "", "", None, None, None)
+        try:
+            for out in run_one(source):
+                llm = out[2]
+                yield (
+                    f"{tag}\n{out[0]}", "\n".join(past_logs + [header, out[1]]), llm,
+                    None, None, None, _batch_progress_html(items),
+                )
+        except Exception as exc:  # the runners report their own errors; this is a backstop
+            out = (_format_pipeline_error(exc), out[1], out[2], None, None, None)
+
+        status, logs, _, audio, srt, render_paths = out
+        if status.startswith("✅"):
+            item["state"] = "done"
+            item["detail"] = audio or srt or ""
+            last_ok = (audio, srt, render_paths)
+        else:
+            item["state"] = "failed"
+            item["detail"] = status.lstrip("❌ ").splitlines()[0] if status else "Failed"
+        past_logs += [header, logs]
+
+    done = sum(it["state"] == "done" for it in items)
+    if done == total:
+        summary = f"✅ Batch complete — all {total} sources processed."
+    elif done:
+        summary = f"⚠️ Batch finished — {done} of {total} succeeded, {total - done} failed."
+    else:
+        summary = f"❌ Batch failed — none of the {total} sources succeeded."
+    if last_ok[0] or last_ok[1]:
+        summary += "\nResults below show the last successful source; open the others from the ✏️ Editor tab."
+
+    yield (summary, "\n".join(past_logs), llm, *last_ok, _batch_progress_html(items))
+
+
+def _llm_settings(is_ollama, ollama_model, openai_key, api_base_url, llm_model):
+    """``(api_key, base_url, model)`` for the chosen provider, without side effects."""
     if is_ollama:
         _api_key = "ollama"
         _base_url = "http://localhost:11434/v1"
@@ -102,8 +232,87 @@ def _resolve_llm(is_ollama, ollama_model, openai_key, api_base_url, llm_model):
                      if api_base_url and api_base_url.strip() else None)
         _llm = (llm_model.strip()
                 if llm_model and llm_model.strip() else None)
+    return _api_key, _base_url, _llm
+
+
+def _resolve_llm(is_ollama, ollama_model, openai_key, api_base_url, llm_model):
+    _api_key, _base_url, _llm = _llm_settings(
+        is_ollama, ollama_model, openai_key, api_base_url, llm_model,
+    )
     os.environ["OPENAI_API_KEY"] = _api_key
     return _api_key, _base_url, _llm
+
+
+_HEALTH_ERRORS = {
+    "AuthenticationError": "Authentication failed — check the API key.",
+    "PermissionDeniedError": "The API key has no access to this model or endpoint.",
+    "NotFoundError": "Model or endpoint not found — check the model name and API Base URL.",
+    "RateLimitError": "Rate limited or out of quota at the provider.",
+    "APITimeoutError": "The request timed out.",
+    "APIConnectionError": "Could not reach the API Base URL.",
+}
+
+
+def check_llm_connection(llm_provider, ollama_model, openai_key,
+                         api_base_url, llm_model, llm_instructions=""):
+    """Send one tiny completion to the configured LLM and report the outcome.
+
+    Uses the same client, model and extra instructions a mission would, but
+    never installs Ollama or pulls models — it only reports what is missing.
+    """
+    is_ollama = (llm_provider == "Ollama (Local — Free)")
+    if not is_ollama and not (openai_key and openai_key.strip()):
+        return "❌ Enter an API key first."
+
+    _api_key, _base_url, _llm = _llm_settings(
+        is_ollama, ollama_model, openai_key, api_base_url, llm_model,
+    )
+    _llm = _llm or os.environ.get("OPENAI_MODEL") or "gpt-4.1"
+
+    if is_ollama:
+        from mazinger import ollama_setup
+        if not ollama_setup.is_running():
+            return ("⚠️ Ollama server is not running. Studio installs and starts it "
+                    "when you start a mission — or click 🧹 Free GPU & Restart Ollama.")
+        if not ollama_setup.has_model(_llm):
+            return (f"⚠️ Ollama is running but model '{_llm}' is not pulled yet. "
+                    "It is downloaded automatically when you start a mission.")
+
+    from mazinger.llm import build_client
+    client = build_client(
+        api_key=_api_key, base_url=_base_url,
+        think=False if is_ollama else None,
+        instructions=llm_instructions,
+        # A cold Ollama model can take a while to load into GPU memory.
+        timeout=180 if is_ollama else 30,
+        max_retries=0,
+    )
+    started = time.monotonic()
+    try:
+        resp = client.chat.completions.create(
+            model=_llm,
+            temperature=0,
+            num_predict=32,
+            messages=[
+                {"role": "system", "content": "You are a connectivity check."},
+                {"role": "user", "content": "Reply with the single word: OK"},
+            ],
+        )
+    except Exception as exc:  # noqa: BLE001 — every failure is reported to the user
+        hint = _HEALTH_ERRORS.get(type(exc).__name__, "")
+        detail = str(exc).strip().splitlines()[0][:300] if str(exc).strip() else type(exc).__name__
+        return f"❌ {hint} ({detail})" if hint else f"❌ {detail}"
+    elapsed = time.monotonic() - started
+
+    reply = (resp.choices[0].message.content or "").strip() if resp.choices else ""
+    where = "Ollama" if is_ollama else (_base_url or "api.openai.com")
+    extra = (" · extra instructions applied"
+             if llm_instructions and llm_instructions.strip() else "")
+    if not reply:
+        return (f"⚠️ Reached '{_llm}' at {where} in {elapsed:.1f}s, "
+                f"but it returned an empty reply{extra}.")
+    return (f"✅ '{_llm}' at {where} replied in {elapsed:.1f}s: "
+            f"\"{reply[:60]}\"{extra}")
 
 
 def _write_cookies(cookies_text):
@@ -182,10 +391,17 @@ def run_dubbing(
     stream_llm,
     youtube_subs=False,
     user_instructions="",
+    llm_instructions="",
+    fit_check=True,
 ):
-    """Generator → yields (status, logs, llm_stream, audio, srt_file, render_paths) tuples."""
+    """Generator → yields (status, logs, llm_stream, audio, srt_file, render_paths, batch_html) tuples.
 
-    _empty = "", "", "", None, None, None
+    Several sources (one URL or path per line, or several uploads) run one
+    after another; ``batch_html`` then carries the progress panel, and stays
+    empty for a single source.
+    """
+
+    _empty = "", "", "", None, None, None, ""
 
     is_ollama = (llm_provider == "Ollama (Local — Free)")
 
@@ -193,7 +409,7 @@ def run_dubbing(
         yield "❌ Please enter your OpenAI API key.", *_empty[1:]
         return
 
-    source, err = _resolve_source(source_type, url, uploaded_file, local_path)
+    sources, err = _resolve_sources(source_type, url, uploaded_file, local_path)
     if err:
         yield err, *_empty[1:]
         return
@@ -222,40 +438,49 @@ def run_dubbing(
         if not (yield from _prepare_ollama(ollama_model, _extra_models, _empty)):
             return
 
-    if output_type != "Dubbed Audio":
-        yield from _run_subtitles(
+    def _run_one(source):
+        if output_type != "Dubbed Audio":
+            return _run_subtitles(
+                source, source_type, cookies_text,
+                target_language, is_ollama, ollama_model, openai_key,
+                api_base_url, llm_model,
+                quality, start_time, end_time,
+                transcribe_method, whisper_model,
+                source_language, words_per_second, duration_budget, translate_technical,
+                use_translation_model,
+                output_type, force_reset,
+                stream_llm,
+                youtube_subs,
+                user_instructions=user_instructions,
+                llm_instructions=llm_instructions,
+            )
+        return _run_full_dub(
             source, source_type, cookies_text,
-            target_language, is_ollama, ollama_model, openai_key,
+            target_language, voice_type, voice_theme_label, voice_preset,
+            voice_file, voice_script_text,
+            is_ollama, ollama_model, openai_key,
             api_base_url, llm_model,
             quality, start_time, end_time,
             transcribe_method, whisper_model,
             source_language, words_per_second, duration_budget, translate_technical,
             use_translation_model,
-            output_type, force_reset,
+            tts_engine,
+            tts_dtype,
+            tempo_mode, max_tempo, segment_mode, loudness_match, mix_background, background_volume,
+            force_reset,
             stream_llm,
             youtube_subs,
             user_instructions=user_instructions,
+            llm_instructions=llm_instructions,
+            fit_check=fit_check,
         )
+
+    if len(sources) == 1:
+        for out in _run_one(sources[0]):
+            yield (*out, "")
         return
 
-    yield from _run_full_dub(
-        source, source_type, cookies_text,
-        target_language, voice_type, voice_theme_label, voice_preset,
-        voice_file, voice_script_text,
-        is_ollama, ollama_model, openai_key,
-        api_base_url, llm_model,
-        quality, start_time, end_time,
-        transcribe_method, whisper_model,
-        source_language, words_per_second, duration_budget, translate_technical,
-        use_translation_model,
-        tts_engine,
-        tts_dtype,
-        tempo_mode, max_tempo, segment_mode, loudness_match, mix_background, background_volume,
-        force_reset,
-        stream_llm,
-        youtube_subs,
-        user_instructions=user_instructions,
-    )
+    yield from _run_batch(sources, _run_one)
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -274,6 +499,7 @@ def _run_subtitles(
     stream_llm,
     youtube_subs=False,
     user_instructions="",
+    llm_instructions="",
 ):
     """Generator → yields (status, logs, llm_stream, audio, srt_file, render_paths) tuples."""
 
@@ -395,6 +621,8 @@ def _run_subtitles(
                 init_kw["base_url"] = _base_url
             if is_ollama:
                 init_kw["think"] = False
+            if llm_instructions and llm_instructions.strip():
+                init_kw["instructions"] = llm_instructions
             client = build_client(**init_kw)
 
             if not want_translation:
@@ -589,6 +817,8 @@ def _run_full_dub(
     stream_llm,
     youtube_subs=False,
     user_instructions="",
+    llm_instructions="",
+    fit_check=True,
 ):
     """Generator → yields (status, logs, llm_stream, audio, srt_file, render_paths) tuples."""
 
@@ -652,6 +882,8 @@ def _run_full_dub(
                 init_kw["llm_model"] = _llm
             if is_ollama:
                 init_kw["llm_think"] = False
+            if llm_instructions and llm_instructions.strip():
+                init_kw["llm_instructions"] = llm_instructions
 
             dubber = MazingerDubber(**init_kw)
 
@@ -674,6 +906,7 @@ def _run_full_dub(
                 tts_dtype=tts_dtype,
                 tempo_mode=tempo_mode.lower(),
                 max_tempo=max_tempo,
+                fit_check=bool(fit_check),
                 loudness_match=loudness_match,
                 mix_background=mix_background,
                 background_volume=background_volume,

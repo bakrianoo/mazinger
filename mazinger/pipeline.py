@@ -29,6 +29,8 @@ class MazingerDubber:
         openai_api_key: API key for OpenAI (or set ``OPENAI_API_KEY`` env var).
         llm_model:      Model identifier used for translation and analysis tasks.
         base_dir:       Root directory under which project folders are created.
+        llm_instructions: Extra guidelines added to the system prompt of every
+                        LLM task (description, review, translation, ...).
     """
 
     def __init__(
@@ -38,12 +40,14 @@ class MazingerDubber:
         llm_model: str | None = None,
         base_dir: str = "./mazinger_output",
         llm_think: bool | None = None,
+        llm_instructions: str | None = None,
     ) -> None:
         self.llm_model = llm_model or os.environ.get("OPENAI_MODEL") or "gpt-4.1"
         self.base_dir = base_dir
         self._api_key = openai_api_key or os.environ.get("OPENAI_API_KEY")
         self._base_url = openai_base_url or os.environ.get("OPENAI_BASE_URL")
         self._llm_think = llm_think
+        self._llm_instructions = (llm_instructions or "").strip() or None
 
     # ------------------------------------------------------------------
     #  Internal helpers
@@ -56,6 +60,7 @@ class MazingerDubber:
             api_key=self._api_key,
             base_url=self._base_url,
             think=self._llm_think,
+            instructions=self._llm_instructions,
         )
 
     def _save_run_info(
@@ -121,6 +126,7 @@ class MazingerDubber:
                 model=self.llm_model,
                 base_url=self._base_url,
                 think=self._llm_think,
+                instructions=self._llm_instructions,
             ),
             translation=translation,
             tts=tts,
@@ -193,6 +199,9 @@ class MazingerDubber:
         subtitle_style=None,
         subtitle_source: str = "translated",
         user_instructions: str = "",
+        fit_check: bool = True,
+        fit_max_ratio: float = 1.15,
+        fit_rounds: int = 2,
     ) -> ProjectPaths:
         """Run the full pipeline: download/ingest, transcribe, translate, and dub.
 
@@ -255,6 +264,11 @@ class MazingerDubber:
                             video output.
             subtitle_source: SRT to burn — ``'translated'`` (default),
                             ``'original'``, or a file path.
+            fit_check:      After TTS, rewrite lines whose speech would need
+                            more than *fit_max_ratio* speed-up to fit their
+                            slot, and re-synthesise them (default ``True``).
+            fit_max_ratio:  Speed-up above which a line is rewritten (1.15).
+            fit_rounds:     Rewrite rounds at most (default 2).
 
         Returns:
             The :class:`ProjectPaths` instance with all output paths populated.
@@ -681,6 +695,26 @@ class MazingerDubber:
             language=tts_language,
             force_reset=force_reset,
         )
+
+        # 7a. Fit check — shorten lines whose speech overflows its slot, so
+        # assembly needs neither a hard speed-up nor a cut.
+        if fit_check and fit_rounds > 0:
+            from mazinger.fit import fit_segments
+            try:
+                fit_segments(
+                    segment_info, srt_entries,
+                    client=client, llm_model=self.llm_model,
+                    voice_prompt=voice_prompt, model=tts_model,
+                    tts_language=tts_language, target_language=target_language,
+                    original_duration=original_duration,
+                    srt_path=proj.final_srt,
+                    max_fit=fit_max_ratio, rounds=fit_rounds,
+                    max_tempo=max_tempo if tempo_mode in ("auto", "dynamic") else 1.0,
+                    usage_tracker=usage_tracker,
+                )
+            except Exception as exc:  # noqa: BLE001 — never block the pipeline
+                log.warning("Fit check skipped: %s", exc)
+
         tts.unload_model(voice_prompt, force=True)
 
         # 7b. OmniVoice auto-voice has no reference clip; promote one of
@@ -789,6 +823,9 @@ class MazingerDubber:
                     tempo_mode=tempo_mode,
                     fixed_tempo=fixed_tempo,
                     max_tempo=max_tempo,
+                    fit_check=fit_check,
+                    fit_max_ratio=fit_max_ratio,
+                    fit_rounds=fit_rounds,
                     loudness_match=loudness_match,
                     mix_background=mix_background,
                     background_volume=background_volume,

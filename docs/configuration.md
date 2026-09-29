@@ -256,16 +256,16 @@ If both `--fixed-tempo` and `--dynamic-tempo` are given, fixed tempo takes prece
 
 ### Duration-Aware Word Budgets
 
-The translator calculates a maximum word count for each subtitle entry:
+The translator calculates a target length for each subtitle entry:
 
 ```
-max_words = duration_seconds × words_per_second × duration_budget
+target = duration_seconds × words_per_second × duration_budget
 ```
 
 | Parameter | Default | Purpose |
 |-----------|---------|---------|
-| `--words-per-second` | `2.0` | Assumed speech rate in the target language |
-| `--duration-budget` | `0.80` | Fraction of time allocated for dubbed speech |
+| `--words-per-second` | auto | Speech rate in the target language; auto uses its TTS rate (characters/second for Chinese and Japanese) |
+| `--duration-budget` | `0.85` | Fraction of time allocated for dubbed speech |
 
 Lower `duration_budget` leaves more silence between entries. Higher `words_per_second` allows more words per entry (useful for fast-paced languages).
 

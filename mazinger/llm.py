@@ -100,6 +100,44 @@ def clear_stream_callback() -> None:
 _OLLAMA_DEFAULT_PORT = 11434
 
 
+# -- Extra instructions ----------------------------------------------------
+
+_INSTRUCTIONS_HEADER = "ADDITIONAL INSTRUCTIONS FROM THE USER (apply to this task):"
+
+
+def _clean_instructions(instructions: str | None) -> str | None:
+    text = (instructions or "").strip()
+    return text or None
+
+
+def inject_instructions(
+    messages: list[dict[str, Any]], instructions: str | None,
+) -> list[dict[str, Any]]:
+    """Return *messages* with the user's extra *instructions* added.
+
+    They are appended to the first system message, so they follow the task's
+    own rules; without a system message a new one is put first.  The caller's
+    list is left untouched.
+    """
+    text = _clean_instructions(instructions)
+    if not text:
+        return messages
+    block = f"{_INSTRUCTIONS_HEADER}\n{text}"
+    out = list(messages)
+    for i, msg in enumerate(out):
+        if msg.get("role") != "system":
+            continue
+        content = msg.get("content")
+        if isinstance(content, str):
+            out[i] = {**msg, "content": f"{content}\n\n{block}"}
+        elif isinstance(content, list):
+            out[i] = {**msg, "content": [*content, {"type": "text", "text": block}]}
+        else:
+            continue
+        return out
+    return [{"role": "system", "content": block}, *out]
+
+
 def _is_ollama_url(url: str | None) -> bool:
     if not url:
         return False
@@ -161,9 +199,14 @@ class _ChatCompletion:
 # -- Ollama native chat ----------------------------------------------------
 
 class _OllamaChatCompletions:
-    def __init__(self, base_url: str, think: bool | None) -> None:
+    def __init__(
+        self, base_url: str, think: bool | None,
+        instructions: str | None = None, timeout: float | None = None,
+    ) -> None:
         self._url = f"{base_url}/api/chat"
         self._think = think
+        self._instructions = _clean_instructions(instructions)
+        self._timeout = timeout
 
     @staticmethod
     def _convert_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -216,7 +259,8 @@ class _OllamaChatCompletions:
 
         body: dict[str, Any] = {
             "model": model,
-            "messages": self._convert_messages(messages),
+            "messages": self._convert_messages(
+                inject_instructions(messages, self._instructions)),
             "stream": bool(callback),
             "options": options,
         }
@@ -235,7 +279,7 @@ class _OllamaChatCompletions:
 
         if not callback:
             # Non-streaming path (original behaviour)
-            with _urlopen(req) as resp:
+            with _urlopen(req, timeout=self._timeout) as resp:
                 result = json.loads(resp.read())
 
             content = result.get("message", {}).get("content", "")
@@ -246,7 +290,7 @@ class _OllamaChatCompletions:
             content_parts: list[str] = []
             prompt_tokens = 0
             eval_tokens = 0
-            with _urlopen(req) as resp:
+            with _urlopen(req, timeout=self._timeout) as resp:
                 for raw_line in resp:
                     line = raw_line.decode("utf-8", errors="replace").strip()
                     if not line:
@@ -281,9 +325,13 @@ class _OllamaChat:
 class _OllamaClient:
     """Drop-in replacement for ``openai.OpenAI`` that talks native Ollama."""
 
-    def __init__(self, base_url: str, think: bool | None) -> None:
+    def __init__(
+        self, base_url: str, think: bool | None,
+        instructions: str | None = None, timeout: float | None = None,
+    ) -> None:
         self._base_url = base_url
-        self.chat = _OllamaChat(_OllamaChatCompletions(base_url, think))
+        self.chat = _OllamaChat(
+            _OllamaChatCompletions(base_url, think, instructions, timeout))
 
     def unload_model(self, model: str) -> None:
         """Tell Ollama to unload *model* from GPU memory."""
@@ -326,8 +374,9 @@ class _StreamingOpenAIChatCompletions:
     _rejected: dict[str, set[str]] = {}
     _rejected_lock = threading.Lock()
 
-    def __init__(self, inner) -> None:
+    def __init__(self, inner, instructions: str | None = None) -> None:
         self._inner = inner
+        self._instructions = _clean_instructions(instructions)
 
     @classmethod
     def _rejected_param(cls, exc: Exception, kwargs: dict) -> str | None:
@@ -385,6 +434,8 @@ class _StreamingOpenAIChatCompletions:
 
     def create(self, **kwargs):
         kwargs = self._normalise_kwargs(kwargs)
+        if "messages" in kwargs:
+            kwargs["messages"] = inject_instructions(kwargs["messages"], self._instructions)
 
         callback = get_stream_callback()
         if not callback:
@@ -423,16 +474,17 @@ class _StreamingOpenAIChatCompletions:
 class _StreamingOpenAIChat:
     """Proxy for ``client.chat`` that wraps ``completions``."""
 
-    def __init__(self, inner_chat) -> None:
-        self.completions = _StreamingOpenAIChatCompletions(inner_chat.completions)
+    def __init__(self, inner_chat, instructions: str | None = None) -> None:
+        self.completions = _StreamingOpenAIChatCompletions(
+            inner_chat.completions, instructions)
 
 
 class _StreamingOpenAIClient:
     """Thin wrapper around ``openai.OpenAI`` that adds stream-callback support."""
 
-    def __init__(self, inner) -> None:
+    def __init__(self, inner, instructions: str | None = None) -> None:
         self._inner = inner
-        self.chat = _StreamingOpenAIChat(inner.chat)
+        self.chat = _StreamingOpenAIChat(inner.chat, instructions)
 
     def __getattr__(self, name: str):
         return getattr(self._inner, name)
@@ -443,17 +495,25 @@ def build_client(
     api_key: str | None = None,
     base_url: str | None = None,
     think: bool | None = None,
+    instructions: str | None = None,
+    timeout: float | None = None,
+    max_retries: int | None = None,
 ) -> Any:
     """Return an LLM client appropriate for the given backend.
 
     For Ollama endpoints, returns a lightweight native client that honours
     the ``think`` parameter.  For everything else, returns a standard
     ``openai.OpenAI`` instance (wrapped for stream-callback support).
+
+    *instructions* are extra guidelines from the user, added to the system
+    prompt of every completion made through the client — see
+    :func:`inject_instructions`.  *timeout* (seconds) and *max_retries*
+    default to the backend's own settings.
     """
     if _is_ollama_url(base_url):
         ollama_base = _ollama_base(base_url)
         log.debug("Using native Ollama client → %s", ollama_base)
-        return _OllamaClient(ollama_base, think)
+        return _OllamaClient(ollama_base, think, instructions, timeout)
 
     from openai import OpenAI
 
@@ -462,4 +522,8 @@ def build_client(
         kwargs["api_key"] = api_key
     if base_url:
         kwargs["base_url"] = base_url
-    return _StreamingOpenAIClient(OpenAI(**kwargs))
+    if timeout is not None:
+        kwargs["timeout"] = timeout
+    if max_retries is not None:
+        kwargs["max_retries"] = max_retries
+    return _StreamingOpenAIClient(OpenAI(**kwargs), instructions)

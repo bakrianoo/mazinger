@@ -68,6 +68,8 @@ mazinger dub <source> [options]
 | `--dynamic-tempo` | off | No-op — `auto` already matches per segment in both directions |
 | `--fixed-tempo` | — | Constant speed multiplier (e.g., `1.1`) |
 | `--max-tempo` | `1.5` | Maximum speed-up ratio applied to overflowing segments |
+| `--no-fit-check` | off | Skip rewriting dubbed lines that are too long for their time slot |
+| `--fit-max-ratio` | `1.15` | Speed-up above which a dubbed line is rewritten shorter and re-dubbed |
 | `--no-loudness-match` | off | Skip loudness normalisation against the original audio |
 | `--no-mix-background` | off | Skip mixing background audio from the original |
 | `--background-volume` | `0.15` | Background audio mix level (0.0–1.0) |

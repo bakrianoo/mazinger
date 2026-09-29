@@ -280,9 +280,10 @@ def add_translation(p: argparse.ArgumentParser) -> None:
         help="Target language for translation (default: English).",
     )
     p.add_argument("--words-per-second", type=float, default=None,
-                   help="Target speech rate in words/sec for duration matching (default: 2.0).")
+                   help="Target speech rate in words/sec for duration matching "
+                        "(default: TTS rate of the target language).")
     p.add_argument("--duration-budget", type=float, default=None,
-                   help="Fraction of time window to fill with translated speech, 0.0-1.0 (default: 0.80).")
+                   help="Fraction of time window to fill with translated speech, 0.0-1.0 (default: 0.85).")
     p.add_argument("--translate-technical-terms", action="store_true", default=False,
                    help="Translate technical terms into the target language. "
                         "When omitted, technical terms are kept in their original language.")

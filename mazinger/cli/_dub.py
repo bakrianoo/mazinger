@@ -36,6 +36,10 @@ def register(subparsers: argparse._SubParsersAction) -> None:
                    help="Convert technical terms to English in the source transcript (requires --asr-review).")
     p.add_argument("--youtube-subs", action="store_true", default=False,
                    help="Download YouTube subtitles and compare with ASR to pick the best source.")
+    p.add_argument("--no-fit-check", action="store_true",
+                   help="Skip rewriting dubbed lines that are too long for their time slot.")
+    p.add_argument("--fit-max-ratio", type=float, default=1.15,
+                   help="Speed-up above which a dubbed line is rewritten shorter (default: 1.15).")
     p.add_argument("--no-loudness-match", action="store_true",
                    help="Skip loudness normalisation against the original audio.")
     p.add_argument("--mix-background", action="store_true", default=False,
@@ -101,6 +105,8 @@ def handler(args: argparse.Namespace) -> None:
         tempo_mode=tempo_mode_from_args(args),
         fixed_tempo=args.fixed_tempo,
         max_tempo=args.max_tempo,
+        fit_check=not args.no_fit_check,
+        fit_max_ratio=args.fit_max_ratio,
         words_per_second=args.words_per_second,
         duration_budget=args.duration_budget,
         translate_technical_terms=args.translate_technical_terms,

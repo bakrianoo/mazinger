@@ -135,7 +135,8 @@ CORRECT only these errors:
 {tech_rule}
 DO NOT:
 - Change meaning, rephrase, or paraphrase
-- Invent new words or terms not present in the original
+- Invent new words or terms not present in the original (use the key terms \
+  above only to recognise misheard words, never to insert them)
 - Add or remove words (except to fix obvious ASR split/merge errors)
 - Translate any text to another language
 - Change word order
@@ -143,18 +144,22 @@ DO NOT:
 
 OUTPUT FORMAT — return ONLY a valid JSON array, no markdown, no explanation:
 [{{"index":"<same index>","text":"<corrected text>"}}, ...]
-{main_example}{tech_example_block}
-Now correct the following JSON array:"""
+{main_example}{tech_example_block}"""
                                                                                                                                                
 def _is_safe_edit(original: str, corrected: str) -> bool:
-    """Reject edits that change text length drastically (likely hallucination)."""
+    """Reject edits that add or remove content (likely hallucination).
+
+    A correction fixes typos, punctuation, spacing and word boundaries, so the
+    letters and digits of the line stay about the same.  Only those are
+    compared — punctuation and spaces are free — with a few characters of
+    slack so short lines can still get a real typo fix.
+    """
     if not corrected.strip():
         return False
-    orig_len = max(len(original), 1)
-    corr_len = len(corrected)
-    if orig_len <= 5:
-        return corr_len <= 30
-    return orig_len / 3 <= corr_len <= orig_len * 3
+    orig = sum(1 for ch in original if ch.isalnum())
+    corr = sum(1 for ch in corrected if ch.isalnum())
+    slack = 4
+    return orig * 0.75 - slack <= corr <= orig * 1.33 + slack
 
 
 def _blocks_to_json(blocks):
@@ -175,7 +180,8 @@ def _parse_response(raw, core_blocks):
             text_map = {}
             for item in items:
                 if isinstance(item, dict) and "index" in item and "text" in item:
-                    text_map[str(item["index"])] = _clean_llm_text(str(item["text"]))
+                    idx = str(item["index"])
+                    text_map[idx] = _clean_llm_text(str(item["text"]), idx)
 
             if not text_map:
                 raise ValueError("No valid entries in LLM response")
@@ -265,7 +271,7 @@ def review_srt(
         if before:
             payload += "== CONTEXT BEFORE (reference only, do NOT return) ==\n"
             payload += _blocks_to_context(before) + "\n\n"
-        payload += "== REVIEW THESE ENTRIES ==\n" + batch_json
+        payload += "== REVIEW THESE ENTRIES (correct and return these) ==\n" + batch_json
         if after:
             payload += "\n\n== CONTEXT AFTER (reference only, do NOT return) ==\n"
             payload += _blocks_to_context(after)
@@ -277,10 +283,8 @@ def review_srt(
 
         resp = client.chat.completions.create(
             model=llm_model, temperature=0.2, messages=msgs, think=False,
-            repeat_penalty=1.2,
             top_p=0.9,
             num_predict=8000,
-            frequency_penalty=0.3,
         )
         if usage_tracker is not None:
             usage_tracker.record("review", llm_model, resp)

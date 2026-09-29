@@ -252,7 +252,9 @@ def assemble_timeline(
         original_duration: Duration of the original audio in seconds.
         output_path:       Where to write the final WAV.
         sample_rate:       Target sample rate.
-        speed_threshold:   Fractional tolerance before tempo-stretching is applied.
+        speed_threshold:   Fractional tolerance before a short segment is slowed
+                           down.  Overflows are always sped up, since the
+                           overflowing part would otherwise be trimmed.
         min_speed_ratio:   Hard floor for slowdown (default 0.82 = max ~22% slower).
                            Below this speech starts sounding unnatural.
         target_fill:       Target fraction of the time window to fill when
@@ -322,8 +324,9 @@ def assemble_timeline(
             outcome = "sped_up"
 
         elif tempo_mode in ("auto", "dynamic"):
-            if speed_ratio > 1.0 + speed_threshold:
-                # Segment overflows — speed it up
+            if speed_ratio > 1.0:
+                # Segment overflows — speed it up.  Even a tiny overflow is
+                # stretched: left as-is it would be trimmed off below.
                 effective_ratio = min(speed_ratio, max_tempo)
                 stretched_path = seg["wav_path"].replace(".wav", "_stretched.wav")
                 audio = _tempo_stretch(seg["wav_path"], effective_ratio, stretched_path, sample_rate)

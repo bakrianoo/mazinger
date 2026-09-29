@@ -42,15 +42,17 @@ _LLM_XML_TAG_RE = re.compile(
 # Markdown code fences
 _CODE_FENCE_RE = re.compile(r"```(?:json|srt|text)?")
 
-# Leading index prefix like "1." or "1:" at the very start of text
-_LEADING_INDEX_RE = re.compile(r"^\d+[.:]\s+")
+# Leading index prefix like "1.", "1:" or "2-3." at the very start of text
+_LEADING_INDEX_RE = re.compile(r"^(\d+(?:\s*[-\u2013]\s*\d+)?)[.:]\s+")
 
 
-def _clean_llm_text(text: str) -> str:
+def _clean_llm_text(text: str, index: str | None = None) -> str:
     """Strip common weak-LLM artifacts from a translated subtitle text.
 
     Removes timestamp tags, duration annotations, SRT arrows, XML tags,
-    code fences, and leading index prefixes that weak models may echo back.
+    and code fences that weak models may echo back.  A leading ``"N. "``
+    prefix is removed only when *index* is given and ``N`` is that entry's
+    own index — otherwise it is real text ("3. Install it", "2024: ...").
     """
     text = _TIMESTAMP_TAG_RE.sub("", text)
     text = _DURATION_TAG_RE.sub("", text)
@@ -60,7 +62,13 @@ def _clean_llm_text(text: str) -> str:
     # Collapse whitespace before checking leading index (prior removals may
     # leave leading spaces that prevent the anchor from matching).
     text = re.sub(r"\s{2,}", " ", text).strip()
-    text = _LEADING_INDEX_RE.sub("", text)
+    if index is not None:
+        m = _LEADING_INDEX_RE.match(text)
+        if m:
+            echoed = re.sub(r"\s+", "", m.group(1)).replace("\u2013", "-")
+            own = re.sub(r"\s+", "", str(index)).replace("\u2013", "-")
+            if echoed in (own, own.split("-")[0]):
+                text = text[m.end():]
     return text.strip()
 
 
@@ -137,6 +145,9 @@ OVERLAP_SIZE = 8
 
 # Baseline TTS speech rate by language (words per second).
 # Measured empirically from Qwen3-TTS output at default settings.
+# Speech rate of the TTS output, in words per second.  Chinese and Japanese
+# are written without spaces, so their budgets count characters instead
+# (see :data:`_CHAR_BUDGET_LANGUAGES`) and their rates are characters/second.
 _TTS_WPS: dict[str, float] = {
     "English": 3.2,
     "French": 3.4,
@@ -145,14 +156,25 @@ _TTS_WPS: dict[str, float] = {
     "Italian": 3.5,
     "Portuguese": 3.4,
     "Russian": 2.8,
-    "Chinese (Simplified)": 3.0,
-    "Chinese (Traditional)": 3.0,
-    "Japanese": 4.0,
+    "Chinese (Simplified)": 4.0,
+    "Chinese (Traditional)": 4.0,
+    "Japanese": 5.0,
     "Korean": 3.2,
     "Arabic": 3.0,
     "Dutch": 3.0,
 }
 _DEFAULT_WPS = 3.0
+
+_CHAR_BUDGET_LANGUAGES = frozenset({
+    "Chinese (Simplified)", "Chinese (Traditional)", "Japanese",
+})
+
+
+def _count_units(text: str, target_language: str) -> int:
+    """Length of *text* in budget units: characters for CJK, words otherwise."""
+    if target_language in _CHAR_BUDGET_LANGUAGES:
+        return sum(1 for ch in text if ch.isalnum())
+    return len(text.split())
 
 # Fraction of duration-based word count to use as the target.
 DURATION_BUDGET = 0.85
@@ -164,26 +186,16 @@ def estimate_wps(
     blocks: list[tuple[str, float, float, str]],
     target_language: str = "English",
 ) -> float:
-    """Estimate the target words-per-second for duration budgeting.
+    """Return the target speech rate used for duration budgeting.
 
-    Uses the source speech rate (words/time in the source SRT) scaled by the
-    known TTS output rate for the target language.  Falls back to the
-    language-specific TTS baseline when the source is too short or sparse.
+    This is the TTS output rate of *target_language* — how much speech fits
+    in a time slot.  The source speech rate is deliberately not used: word
+    counts do not carry across languages (an Arabic sentence has about half
+    the words of its English translation, and Chinese or Japanese text has no
+    spaces at all), so capping at the source rate starved translations of
+    words.  *blocks* is kept for API compatibility.
     """
-    tts_wps = _TTS_WPS.get(target_language, _DEFAULT_WPS)
-
-    # Measure source speech density
-    total_words = sum(len(text.split()) for _, _, _, text in blocks)
-    total_dur = sum(end - start for _, start, end, _ in blocks)
-    if total_dur < 1.0 or total_words < 5:
-        return tts_wps
-
-    source_wps = total_words / total_dur
-
-    # The source speaker may be much faster than TTS can reproduce.
-    # Cap at the TTS baseline — requesting more words than TTS can speak
-    # just causes overflow and truncation.
-    return min(source_wps, tts_wps)
+    return _TTS_WPS.get(target_language, _DEFAULT_WPS)
 
 
 def _build_system_prompt(
@@ -206,7 +218,11 @@ def _build_system_prompt(
     budget_pct = int(duration_budget * 100)
     example_dur = 20.0
     example_target = int(example_dur * words_per_second * duration_budget)
-    over_example = example_target + 5
+    unit = "characters" if target_language in _CHAR_BUDGET_LANGUAGES else "words"
+    unit_note = (
+        f" For {target_language}, \"target_words\" counts characters, not words."
+        if unit == "characters" else ""
+    )
 
     if source_language == "auto":
         source_ctx = (
@@ -263,20 +279,17 @@ QUALITY GOALS:
   it into clean {target_language} that keeps the same emphasis without crude \
   repetition.
 
-DURATION MATCHING (CRITICAL FOR DUBBING):
-- Each entry has a "target_words" field — the HARD MAXIMUM number of words \
-  for your translation. Exceeding it causes the dubbed audio to be CUT OFF \
-  mid-sentence, ruining the viewer experience.
-- The target word count equals ~{budget_pct}% of the available time window \
-  (at ~{words_per_second:.1f} {target_language} words/second).
-- ALWAYS count your output words and ensure they are ≤ target_words. \
-  For example, if "target_words": {example_target}, write exactly \
-  {example_target} words or fewer — never {over_example}.
-- Aim for 85-100% of the target. Fewer words = awkward silence; \
-  more words = speech cut off.
-- If the original content is too dense for the word budget, PRIORITISE \
-  the core meaning and drop minor asides or redundant phrases. \
-  Never pad with filler.
+DURATION MATCHING (IMPORTANT FOR DUBBING):
+- Each entry has a "target_words" field — the length that fits the entry's \
+  time slot (~{budget_pct}% of it at ~{words_per_second:.1f} {target_language} \
+  {unit}/second).{unit_note}
+- Stay at or under target_words (e.g. about {example_target} or fewer when \
+  "target_words": {example_target}). Small overruns are absorbed by speeding \
+  up the audio slightly; much longer text gets cut off.
+- Use as many {unit} as the meaning needs, up to the target. Shorter is fine \
+  when the source says less -- never pad with filler.
+- If the original is too dense for the budget, use tighter, more concise \
+  phrasing, but keep every point, name, number and example.
 
 STRUCTURAL RULES:
 1. Translate EVERY entry in the MAIN BLOCK. Do NOT skip or reorder entries.
@@ -284,7 +297,9 @@ STRUCTURAL RULES:
    same sentence or one continuous spoken thought (e.g. entry N introduces \
    a person/concept and entry N+1 immediately continues describing it), \
    you SHOULD merge them into a single entry. Use a hyphenated index like \
-   "2-3" and the combined word budget. Do NOT merge entries that are about \
+   "2-3" and the sum of their target_words. A merged entry must translate \
+   ALL the content of every entry it covers, and those entries must not \
+   also appear on their own. Do NOT merge entries that are about \
    different topics or separated by a clear topic shift.
 2. Return a JSON array of objects in the SAME order. \
    Each object must have exactly two keys: \
@@ -328,10 +343,11 @@ def _technical_terms_instruction(
             f"into the {target_language} sentence."
         )
     return (
-        f"Keep technical terms in their original language: {kw_examples}. "
-        f"Embed them naturally within the {target_language} sentence so the "
-        f"result reads fluently — adjust surrounding grammar, prepositions, "
-        f"and word order as needed to accommodate the foreign-language term."
+        f"Keep technical terms, product/library names and proper nouns in "
+        f"their original form (e.g. {kw_examples}); translate all ordinary "
+        f"words and phrases. Embed kept terms naturally within the "
+        f"{target_language} sentence so the result reads fluently — adjust "
+        f"surrounding grammar, prepositions, and word order as needed."
     )
 
 
@@ -432,8 +448,8 @@ def _build_messages(
             "suitable for dubbing. Use CONTEXT BEFORE/AFTER for surrounding context "
             "but ONLY return translations for the MAIN BLOCK. Use the screenshots "
             "and context to resolve vague or incomplete references.\n"
-            "Match the target_words count for each entry -- this is critical for "
-            "dubbing timing.\n"
+            "Keep each entry at or under its target_words for dubbing timing, "
+            "without dropping any of its content.\n"
             "Return a JSON array of {\"index\": ..., \"text\": ...} objects in order.\n\n"
             + payload
         ),
@@ -450,6 +466,7 @@ _RANGE_INDEX_RE = re.compile(r'^(\d+)\s*[-\u2013]\s*(\d+)$')
 def _parse_translation_response(
     raw_content: str,
     core_blocks: list[tuple[str, float, float, str]],
+    missing: list[str] | None = None,
 ) -> list[tuple[str, float, float, str]]:
     """Parse LLM JSON response and reconstruct blocks with original timestamps.
 
@@ -459,7 +476,11 @@ def _parse_translation_response(
 
     Falls back to treating the response as raw SRT if JSON parsing fails,
     and ultimately falls back to keeping original text if nothing works.
+    The index of every entry that kept its original text is appended to
+    *missing* when given, so the caller can retry it.
     """
+    if missing is None:
+        missing = []
     block_by_idx: dict[str, tuple[str, float, float, str]] = {
         idx: (idx, start, end, text) for idx, start, end, text in core_blocks
     }
@@ -475,20 +496,26 @@ def _parse_translation_response(
                 if not isinstance(item, dict) or "index" not in item or "text" not in item:
                     continue
                 raw_idx = str(item["index"]).strip()
-                text = _clean_llm_text(str(item["text"]))
+                text = _clean_llm_text(str(item["text"]), raw_idx)
 
                 range_m = _RANGE_INDEX_RE.match(raw_idx)
                 if range_m:
                     first = range_m.group(1)
                     last = range_m.group(2)
+                    if first in absorbed:
+                        continue  # overlaps an earlier merge
                     first_block = block_by_idx.get(first)
                     last_block = block_by_idx.get(last)
-                    if first_block and last_block and text:
+                    span = [str(i) for i in range(int(first), int(last) + 1)]
+                    if (first_block and last_block and text
+                            and all(i in block_by_idx for i in span)):
+                        # Entries of the span already returned on their own
+                        # would be dubbed twice — the merged text replaces them.
+                        result = [r for r in result if r[0] not in span]
                         merged_start = first_block[1]
                         merged_end = last_block[2]
                         result.append((first, merged_start, merged_end, text))
-                        for i in range(int(first) + 1, int(last) + 1):
-                            absorbed.add(str(i))
+                        absorbed.update(span[1:])
                         log.info("Merged translation entries %s-%s", first, last)
                     elif first_block and text:
                         result.append((first, first_block[1], first_block[2], text))
@@ -502,6 +529,7 @@ def _parse_translation_response(
                         else:
                             log.warning("Empty translation for index %s, keeping original", raw_idx)
                             result.append(block)
+                            missing.append(raw_idx)
 
             # Add any blocks not covered by translation or absorption
             covered = {r[0] for r in result} | absorbed
@@ -509,6 +537,7 @@ def _parse_translation_response(
                 if idx not in covered:
                     log.warning("Missing translation for index %s, keeping original", idx)
                     result.append((idx, start, end, original_text))
+                    missing.append(idx)
 
             # Sort by start time to maintain order
             result.sort(key=lambda x: x[1])
@@ -528,17 +557,19 @@ def _parse_translation_response(
     translated_srt_blocks = parse_blocks(sanitize(raw_content))
     if translated_srt_blocks:
         result = []
-        srt_map = {b[0]: _clean_llm_text(b[3]) for b in translated_srt_blocks}
+        srt_map = {b[0]: _clean_llm_text(b[3], b[0]) for b in translated_srt_blocks}
         for idx, start, end, original_text in core_blocks:
             translated_text = srt_map.get(idx, "")
             if translated_text:
                 result.append((idx, start, end, translated_text))
             else:
                 result.append((idx, start, end, original_text))
+                missing.append(idx)
         return result
 
     # Last resort: return original blocks unchanged
     log.warning("All parsing failed, returning original text for batch")
+    missing.extend(b[0] for b in core_blocks)
     return list(core_blocks)
 
 
@@ -547,6 +578,7 @@ def _validate_word_counts(
     words_per_second: float,
     duration_budget: float,
     tolerance: float = 1.5,
+    target_language: str = "",
 ) -> list[tuple[str, float, float, str, int, int]]:
     """Return blocks that exceed their word budget by more than *tolerance*.
 
@@ -556,7 +588,7 @@ def _validate_word_counts(
     for idx, start, end, text in translated_blocks:
         dur = end - start
         target = max(MIN_TARGET_WORDS, round(dur * words_per_second * duration_budget))
-        actual = len(text.split())
+        actual = _count_units(text, target_language)
         if actual > target * tolerance:
             violations.append((idx, start, end, text, actual, target))
     return violations
@@ -652,11 +684,6 @@ def translate_srt(
         after_blocks = all_blocks[core_end:ctx_after_end]
 
         # Build JSON payload — no timestamps sent to LLM
-        batch_json = _blocks_to_json_entries(
-            core_blocks,
-            words_per_second=words_per_second,
-            duration_budget=duration_budget,
-        )
         # Context blocks as simple numbered text (no timestamps)
         context_before = _blocks_to_context_text(before_blocks) if before_blocks else ""
         context_after = _blocks_to_context_text(after_blocks) if after_blocks else ""
@@ -671,30 +698,44 @@ def translate_srt(
             len(core_blocks), len(before_blocks), len(after_blocks),
         )
 
-        msgs = _build_messages(
-            system_prompt, batch_json, batch_thumbs,
-            keypoints, keywords, context_before, context_after,
-            target_language=target_language,
-            video_meta=video_meta,
-        )
-        resp = client.chat.completions.create(
-            model=llm_model, temperature=0.3, messages=msgs,
-            repeat_penalty=1.2,
-            top_p=0.9,
-            num_predict=8000,
-            frequency_penalty=0.3,
-        )
-        if usage_tracker is not None:
-            usage_tracker.record("translate", llm_model, resp)
+        def _translate(blocks):
+            msgs = _build_messages(
+                system_prompt,
+                _blocks_to_json_entries(blocks, words_per_second, duration_budget),
+                batch_thumbs, keypoints, keywords, context_before, context_after,
+                target_language=target_language,
+                video_meta=video_meta,
+            )
+            resp = client.chat.completions.create(
+                model=llm_model, temperature=0.3, messages=msgs,
+                top_p=0.9,
+                num_predict=8000,
+            )
+            if usage_tracker is not None:
+                usage_tracker.record("translate", llm_model, resp)
+            return (resp.choices[0].message.content or "").strip()
 
         # Parse JSON response and reconstruct SRT with original timestamps
-        raw_content = resp.choices[0].message.content.strip()
-        batch_translated = _parse_translation_response(raw_content, core_blocks)
+        missing: list[str] = []
+        batch_translated = _parse_translation_response(
+            _translate(core_blocks), core_blocks, missing,
+        )
+        if missing:
+            # One retry for entries that came back missing, empty or
+            # unparseable — otherwise they would be dubbed in the source language.
+            log.info("Retrying %d untranslated entries of batch %d", len(missing), batch_idx + 1)
+            retry_blocks = [b for b in core_blocks if b[0] in set(missing)]
+            retried = _parse_translation_response(_translate(retry_blocks), retry_blocks)
+            batch_translated = sorted(
+                [b for b in batch_translated if b[0] not in set(missing)] + retried,
+                key=lambda b: b[1],
+            )
         translated_blocks.extend(batch_translated)
 
     # Validation report (assembly handles overflow via tempo stretch)
     violations = _validate_word_counts(
         translated_blocks, words_per_second, duration_budget,
+        target_language=target_language,
     )
     if violations:
         over_total = sum(a - t for _, _, _, _, a, t in violations)
@@ -825,10 +866,8 @@ def translate_chunk(
     )
     resp = client.chat.completions.create(
         model=llm_model, temperature=0.3, messages=msgs,
-        repeat_penalty=1.2,
         top_p=0.9,
         num_predict=8000,
-        frequency_penalty=0.3,
     )
     if usage_tracker is not None:
         usage_tracker.record("translate", llm_model, resp)
@@ -847,7 +886,7 @@ def translate_chunk(
         if isinstance(items, dict):
             items = [items]
         if isinstance(items, list) and len(items) == 1 and isinstance(items[0], dict):
-            text = _clean_llm_text(str(items[0].get("text", "")))
+            text = _clean_llm_text(str(items[0].get("text", "")), str(items[0].get("index", "")))
     if not text:
         raise ValueError(f"Could not parse a translation from the model reply: {raw_content[:200]!r}")
     return text

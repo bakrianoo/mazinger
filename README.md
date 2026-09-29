@@ -36,7 +36,7 @@ uv pip install "mazinger[all]"
 mazinger web --with-ollama --with-coherex
 ```
 
-A local URL opens in your browser. Paste a video link, pick a voice, and click **Start**. The flags install a free local LLM (Ollama) and pre-download **CohereX**, the transcription backend Studio defaults to — no API keys required.
+A local URL opens in your browser. Paste a video link, pick a voice, and click **Start**. To process several videos in one go, put one URL or local path per line (or upload several files); they run one after another with a progress bar. The flags install a free local LLM (Ollama) and pre-download **CohereX**, the transcription backend Studio defaults to — no API keys required.
 
 > **No Hugging Face account?** CohereX's weights are gated, so swap in `--with-faster-whisper` and pick **Faster Whisper** in the UI — it needs no sign-in and covers any language.
 

@@ -352,7 +352,7 @@ translate_srt(
     target_language="English",
     blocks_per_batch=24,
     overlap_size=8,
-    words_per_second=None,       # auto-estimated from source + target language
+    words_per_second=None,       # auto: TTS speech rate of the target language
     duration_budget=0.85,
     translate_technical_terms=False,
     usage_tracker=None,    # LLMUsageTracker
@@ -505,7 +505,7 @@ translate_chunk(
     llm_model="gpt-4.1",
     source_language="auto",
     target_language="English",
-    words_per_second=None,         # estimated from the chunk when None
+    words_per_second=None,         # auto: TTS speech rate of the target language
     duration_budget=0.85,
     translate_technical_terms=False,
     user_instructions="",

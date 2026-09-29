@@ -15,7 +15,7 @@ from mazinger.studio.helpers import (
     hf_login_flow, hf_login_with_token, hf_logout, hf_status,
     HF_MODEL_LINKS_INLINE,
 )
-from mazinger.studio.pipeline import run_dubbing, render_video
+from mazinger.studio.pipeline import run_dubbing, render_video, check_llm_connection
 from mazinger.studio import editor_ui
 
 # Players load segment WAVs and clips straight from the project folders.
@@ -47,12 +47,16 @@ with gr.Blocks(title="Mazinger Studio", theme=theme, css=CSS) as app:
                     container=False,
                 )
                 url_input = gr.Textbox(
-                    label="Video URL",
-                    placeholder="https://www.youtube.com/watch?v=…",
+                    label="Video URL(s)",
+                    placeholder="https://www.youtube.com/watch?v=…\nhttps://www.youtube.com/watch?v=…",
+                    info="One URL per line — several run one after another",
+                    lines=3,
+                    max_lines=15,
                     visible=True,
                 )
                 file_input = gr.File(
-                    label="Upload a video or audio file",
+                    label="Upload video or audio files",
+                    file_count="multiple",
                     file_types=[
                         # video
                         ".mp4", ".mkv", ".avi", ".mov", ".webm", ".flv", ".wmv", ".ts", ".m2ts",
@@ -62,9 +66,11 @@ with gr.Blocks(title="Mazinger Studio", theme=theme, css=CSS) as app:
                     visible=False,
                 )
                 local_path_input = gr.Textbox(
-                    label="Local file path",
-                    placeholder="/path/to/video.mp4",
-                    info="Absolute path to a video or audio file on this machine",
+                    label="Local file path(s)",
+                    placeholder="/path/to/video.mp4\n/path/to/another.mp4",
+                    info="Absolute paths to video or audio files on this machine, one per line",
+                    lines=3,
+                    max_lines=15,
                     visible=False,
                 )
 
@@ -301,6 +307,39 @@ with gr.Blocks(title="Mazinger Studio", theme=theme, css=CSS) as app:
                             value="gpt-4.1",
                         )
 
+                llm_instructions = gr.Textbox(
+                    label="Extra LLM instructions (optional)",
+                    placeholder=(
+                        "e.g. Use Modern Standard Arabic, never dialect. "
+                        "Keep brand and product names in English. "
+                        "Prefer short, plain sentences."
+                    ),
+                    lines=3,
+                    max_lines=10,
+                    info=(
+                        "Added to the system prompt of every LLM task: thumbnails, "
+                        "content analysis, ASR review, translation and re-segmentation."
+                    ),
+                )
+
+                with gr.Row(elem_classes="row-bottom"):
+                    llm_check_btn = gr.Button(
+                        "🩺 Test LLM Connection",
+                        variant="secondary",
+                        size="sm",
+                    )
+                    llm_check_status = gr.Textbox(
+                        label="LLM Status",
+                        interactive=False,
+                        scale=3,
+                    )
+                llm_check_btn.click(
+                    fn=check_llm_connection,
+                    inputs=[llm_provider, ollama_model, openai_key,
+                            api_base_url, llm_model, llm_instructions],
+                    outputs=[llm_check_status],
+                )
+
                 with gr.Row(elem_classes="row-bottom"):
                     gpu_btn = gr.Button(
                         "🧹 Free GPU & Restart Ollama",
@@ -338,7 +377,7 @@ with gr.Blocks(title="Mazinger Studio", theme=theme, css=CSS) as app:
                             words_per_second = gr.Slider(
                                 0.0, 4.0, value=0.0, step=0.1,
                                 label="Words per second",
-                                info="0 = auto-estimate from source speech rate",
+                                info="0 = auto (TTS speech rate of the target language)",
                             )
                             duration_budget = gr.Slider(
                                 0.5, 1.0, value=0.85, step=0.05,
@@ -392,6 +431,15 @@ with gr.Blocks(title="Mazinger Studio", theme=theme, css=CSS) as app:
                         max_tempo = gr.Slider(
                             1.0, 2.0, value=1.5, step=0.05,
                             label="Max tempo",
+                        )
+                        fit_check = gr.Checkbox(
+                            label="Fit check: shorten lines that are too long for their slot",
+                            value=True,
+                            info=(
+                                "After TTS, lines needing more than 1.15× speed-up are "
+                                "rewritten shorter (same meaning) and re-dubbed, so audio "
+                                "is not sped up hard or cut."
+                            ),
                         )
                         segment_mode = gr.Dropdown(
                             ["Short", "Long (default)", "Auto"],
@@ -464,6 +512,8 @@ with gr.Blocks(title="Mazinger Studio", theme=theme, css=CSS) as app:
             )
 
             # ── Status & Logs ─────────────────────────────────────────────
+            # Filled only when several sources run as a batch.
+            batch_progress = gr.HTML(value="", elem_classes="batch-progress-wrap")
             status = gr.Textbox(
                 label="Status",
                 interactive=False,
@@ -637,8 +687,11 @@ with gr.Blocks(title="Mazinger Studio", theme=theme, css=CSS) as app:
                     stream_llm,
                     youtube_subs,
                     user_instructions,
+                    llm_instructions,
+                    fit_check,
                 ],
-                outputs=[status, logs, llm_stream_box, audio_output, srt_output, render_state],
+                outputs=[status, logs, llm_stream_box, audio_output, srt_output, render_state,
+                         batch_progress],
             ).then(
                 fn=_show_render,
                 inputs=[render_state],

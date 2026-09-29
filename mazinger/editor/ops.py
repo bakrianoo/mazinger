@@ -189,6 +189,7 @@ class Resources:
                 api_key=self.api_key or os.environ.get("OPENAI_API_KEY"),
                 base_url=llm.get("base_url") or os.environ.get("OPENAI_BASE_URL"),
                 think=llm.get("think"),
+                instructions=llm.get("instructions"),
             )
         return self._llm
 
