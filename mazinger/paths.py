@@ -11,7 +11,8 @@ class ProjectPaths:
     Directory layout under ``<base_dir>/projects/<slug>/``::
 
         source/              downloaded video + extracted audio   (shared)
-                             + cached background stem and loudness
+                             + cached background/vocals stems, loudness
+                             and speech map
         source/youtube_subs/ subtitles downloaded from YouTube    (shared)
         transcription/       raw and processed SRT files          (shared)
         thumbnails/          extracted frames + metadata          (shared)
@@ -74,6 +75,7 @@ class ProjectPaths:
         self.source_lang = os.path.join(self.transcription_dir, "source.lang.txt")
         self.pre_validation_srt = os.path.join(self.transcription_dir, "source.PRE_VALIDATION.srt")
         self.source_loudness = os.path.join(self.source_dir, "loudness.json")
+        self.speech_map = os.path.join(self.source_dir, "speech_map.json")
         self.thumbs_meta = os.path.join(self.thumbnails_dir, "meta.json")
         self.description = os.path.join(self.analysis_dir, "description.json")
 
@@ -95,6 +97,10 @@ class ProjectPaths:
         Shared by every language and reused while newer than ``audio.mp3``.
         """
         return os.path.join(self.source_dir, f"background.{sample_rate}.wav")
+
+    def vocals_audio(self, sample_rate: int = 24_000) -> str:
+        """Cached vocals stem, written by the same Demucs pass as the background."""
+        return os.path.join(self.source_dir, f"vocals.{sample_rate}.wav")
 
     def ensure_dirs(self) -> ProjectPaths:
         """Create all project sub-directories (idempotent)."""

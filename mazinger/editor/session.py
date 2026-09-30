@@ -130,6 +130,9 @@ class Chunk:
     stale: set[str] = field(default_factory=set)
     history: list[dict] = field(default_factory=list)
     rev: int = 0
+    # Seconds of original speech the chunk replaces, in the "sync" tempo
+    # mode (see Session.refresh_targets); not saved.
+    target: float | None = field(default=None, compare=False, repr=False)
 
     # -- derived -----------------------------------------------------------
 
@@ -139,10 +142,15 @@ class Chunk:
 
     @property
     def fit_ratio(self) -> float | None:
-        """Dub length over slot length; ``None`` without a dub."""
-        if not self.dub_wav or self.duration <= 0:
+        """Dub length over slot length; ``None`` without a dub.
+
+        In the ``sync`` tempo mode the slot is the original speech the chunk
+        replaces (:attr:`target`) rather than its subtitle span.
+        """
+        slot = self.target or self.duration
+        if not self.dub_wav or slot <= 0:
             return None
-        return self.dub_dur / self.duration
+        return self.dub_dur / slot
 
     @property
     def has_text(self) -> bool:
@@ -304,6 +312,21 @@ def _wav_duration(path: str) -> float | None:
 #  Session
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def _is_sync(run_info: dict | None) -> bool:
+    return ((run_info or {}).get("assembly") or {}).get("tempo_mode") == "sync"
+
+
+def _dub_duration(path: str, run_info: dict | None) -> float | None:
+    """A dub's length for fit checks: its speech in sync mode, else the file's."""
+    if not _is_sync(run_info) or not os.path.isfile(path):
+        return _wav_duration(path)
+    try:
+        from mazinger.tts import speech_duration
+        return speech_duration(path)
+    except Exception:  # noqa: BLE001 — fall back to the file length
+        return _wav_duration(path)
+
+
 class Session:
     """The chunks of one project language, their edits and their persistence.
 
@@ -340,6 +363,37 @@ class Session:
             nums = [int(c.id[1:]) for c in self.chunks if c.id[1:].isdigit()]
             next_id = max(nums, default=0) + 1
         self.next_id = next_id
+        self._speech_map = None
+        self.refresh_targets()
+
+    # ── sync targets ─────────────────────────────────────────────────────────
+
+    @property
+    def sync(self) -> bool:
+        """Whether the dub is assembled in the ``sync`` tempo mode."""
+        return _is_sync(self.run_info)
+
+    def refresh_targets(self) -> None:
+        """Set each chunk's :attr:`Chunk.target` from the project's speech map.
+
+        Only in the ``sync`` tempo mode and when the dub left a speech map;
+        otherwise targets are cleared and fit checks use the subtitle span.
+        Cheap, so it runs after every edit.
+        """
+        with self._lock:
+            smap = None
+            if self.sync:
+                if self._speech_map is None:
+                    from mazinger.speech import load_speech_map
+                    self._speech_map = load_speech_map(self.proj.speech_map) or False
+                smap = self._speech_map or None
+            if smap is None:
+                for c in self.chunks:
+                    c.target = None
+                return
+            from mazinger.speech import speech_spans
+            for c, sp in zip(self.chunks, speech_spans([(c.start, c.end) for c in self.chunks], smap)):
+                c.target = sp.duration
 
     # ── construction ─────────────────────────────────────────────────────────
 
@@ -381,7 +435,7 @@ class Session:
                 target_text=e["text"].strip(),
             )
             wav = os.path.join(proj.tts_segments_dir, f"seg_{e['idx'].zfill(4)}.wav")
-            dur = _wav_duration(wav) if c.has_text else None
+            dur = _dub_duration(wav, run_info) if c.has_text else None
             if dur is not None:
                 c.dub_wav, c.dub_dur = project_relpath(proj, wav), dur
             elif c.has_text:
@@ -436,6 +490,8 @@ class Session:
                 log.error("Stopping change-log replay at rev %s: %s", rec.get("rev"), exc)
                 break
             replayed += 1
+        if replayed:
+            session.refresh_targets()
 
         missing = 0
         for c in session.chunks:
@@ -834,6 +890,7 @@ class Session:
         self.chunks[at:at + len(removed)] = new
         if [c.id for c in new] != removed:
             self._reindex()
+        self.refresh_targets()
         if output_stale:
             self.output_stale = True
         self._log({

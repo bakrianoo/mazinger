@@ -34,7 +34,7 @@ mazinger dub <source> [options]
 | `--cookies-from-browser` | — | Browser name for yt-dlp cookie extraction |
 | `--cookies` | — | Path to a Netscape cookies.txt file |
 | `--clone-profile` | — | Voice profile name from HuggingFace or local directory path |
-| `--voice-theme` | — | Pre-defined voice theme (e.g. `narrator-m`, `warm-f`). See `mazinger profile list` |
+| `--voice-theme` | — | Pre-defined voice theme (e.g. `narrator-m`, `warm-f`). See `mazinger profile list`. The voice is kept in the project's `voice_profile/`; with `--tts-engine omnivoice` it uses OmniVoice's own voice design |
 | `--voice-sample` | — | Path to reference voice audio file |
 | `--voice-script` | — | Path to transcript of the voice sample (or inline text) |
 | `--transcribe-method` | `faster-whisper` | `openai`, `faster-whisper`, `whisperx`, `coherex`, `mlx-whisper`, or `deepgram` |
@@ -46,15 +46,19 @@ mazinger dub <source> [options]
 | `--deepgram-api-key` | `$DEEPGRAM_API_KEY` | Deepgram API key (required for `--transcribe-method deepgram`) |
 | `--device` | `auto` | `auto`, `cuda`, or `cpu` |
 | `--source-language` | `auto` | Source language for translation (or `auto` to detect) |
-| `--target-language` | `English` | Target language for translation |
+| `--target-language` | `English` | Target language for translation. `Chinese` and `Cantonese`, the TTS names Studio offers, are accepted too |
 | `--words-per-second` | `2.0` | Speech rate used for duration-aware word budgets |
 | `--duration-budget` | `0.80` | Fraction of available time for dubbed speech |
 | `--translate-technical-terms` | off | Translate technical terms instead of keeping them in English |
 | `--asr-review` | off | Review ASR transcript with LLM to fix typos and punctuation |
 | `--keep-technical-english` | off | Convert technical terms to English in the source transcript (requires `--asr-review`) |
 | `--youtube-subs` | off | Download YouTube subtitles and compare with ASR to pick the best source |
+| `--translation-model` | — | Translate each subtitle on its own with this model (e.g. the `translategemma` Ollama model). Skips visual context and duration budgeting |
+| `--user-instructions` | — | Content and translation guidance for content analysis and translation |
+| `--llm-instructions` | — | Extra instructions added to the system prompt of every LLM task |
 | `--tts-engine` | `qwen` | `qwen`, `chatterbox`, `mlx`, or `omnivoice` |
 | `--tts-model` | `Qwen/Qwen3-TTS-12Hz-1.7B-Base` | Qwen model ID |
+| `--dtype` | `bfloat16` | Qwen3-TTS weight dtype: `bfloat16`, `float16`, or `float32` |
 | `--mlx-tts-model` | `mlx-community/Qwen3-TTS-12Hz-0.6B-Base-bf16` | MLX TTS model name |
 | `--chatterbox-model` | `ResembleAI/chatterbox` | Chatterbox model ID |
 | `--omnivoice-model` | `k2-fsa/OmniVoice` | OmniVoice model ID |
@@ -65,14 +69,17 @@ mazinger dub <source> [options]
 | `--output-type` | `audio` | `audio` (WAV only) or `video` (muxed MP4) |
 | `--embed-subtitles` | off | Burn subtitles into output video (implies `--output-type video`) |
 | `--subtitle-source` | `translated` | `translated`, `original`, or path to a custom SRT file |
-| `--dynamic-tempo` | off | No-op — `auto` already matches per segment in both directions |
+| `--tempo-mode` | `sync` | `sync` — fit each line to the length of the original speech it replaces and place it at its onset; the output is exactly as long as the source. `auto`/`dynamic` — fit to subtitle slots. `fixed`, `off` |
+| `--dynamic-tempo` | off | Same as `--tempo-mode dynamic` |
 | `--fixed-tempo` | — | Constant speed multiplier (e.g., `1.1`) |
 | `--max-tempo` | `1.5` | Maximum speed-up ratio applied to overflowing segments |
+| `--min-tempo` | `0.8` | Slowest a line is stretched in `sync` mode |
 | `--no-fit-check` | off | Skip rewriting dubbed lines that are too long for their time slot |
 | `--fit-max-ratio` | `1.15` | Speed-up above which a dubbed line is rewritten shorter and re-dubbed |
 | `--no-loudness-match` | off | Skip loudness normalisation against the original audio |
-| `--no-mix-background` | off | Skip mixing background audio from the original |
-| `--background-volume` | `0.15` | Background audio mix level (0.0–1.0) |
+| `--mix-background` | on in `sync`, else off | Mix the original background (music, effects) under the dub |
+| `--no-mix-background` | — | Do not mix the original background |
+| `--background-volume` | `1.0` in `sync` with Demucs, else `0.15` | Background audio mix level (0.0–1.0) |
 | `--start` | — | Start timestamp for slicing (e.g. `00:01:30` or `90`) |
 | `--end` | — | End timestamp for slicing (e.g. `00:05:00` or `300`) |
 | `--force-reset` | off | Discard all cached outputs and re-run from scratch |
@@ -82,6 +89,13 @@ mazinger dub <source> [options]
 | `--llm-think` / `--no-llm-think` | — | Enable/disable LLM thinking mode (use `--no-llm-think` for Ollama Qwen3) |
 
 All `--subtitle-*` styling flags are also accepted. See [Subtitle Styling](subtitle-styling.md).
+
+> **From Studio:** set up a dub in Mazinger Studio and click **🧾 Show CLI
+> command** instead of **Start** to get the `mazinger dub` command that runs it
+> with the same settings. API keys are left out: the command reads
+> `OPENAI_API_KEY`. The *Transcription Subtitles* and *Translated Subtitles*
+> outputs have no single CLI equivalent, so their commands are marked
+> approximate.
 
 **Examples:**
 
@@ -392,9 +406,11 @@ mazinger speak [source] [options]
 | `--chatterbox-cfg` | `0.5` | Pacing control (0.0–1.0) |
 | `--device` | `auto` | `auto`, `cuda`, `cpu` |
 | `--dtype` | `bfloat16` | Weight dtype for Qwen: `bfloat16`, `float16`, `float32` |
-| `--dynamic-tempo` | off | No-op — `auto` already matches per segment in both directions |
+| `--tempo-mode` | `sync` | See `dub`. `sync` builds a speech map of the original audio (cached in the project) |
+| `--dynamic-tempo` | off | Same as `--tempo-mode dynamic` |
 | `--fixed-tempo` | — | Constant speed multiplier |
 | `--max-tempo` | `1.5` | Maximum speed-up ratio |
+| `--min-tempo` | `0.8` | Slowest a line is stretched in `sync` mode |
 | `--force-reset` | off | Re-synthesize all segments from scratch |
 
 **Examples:**

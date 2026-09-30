@@ -88,6 +88,30 @@ class TTSWrapper(abc.ABC):
             results.append(self.synthesize(t, lang))
         return results
 
+    def synthesize_to(
+        self, text: str, language: str = "English", target_dur: float | None = None,
+    ) -> tuple[np.ndarray, int]:
+        """Like :meth:`synthesize`, aiming at *target_dur* seconds of speech.
+
+        Engines without length control ignore the target (the default);
+        assembly then fits the clip by time-stretching.
+        """
+        return self.synthesize(text, language)
+
+    def synthesize_batch_to(
+        self, items: list[tuple[str, str, float | None]],
+    ) -> list[tuple[np.ndarray, int]]:
+        """Batch form of :meth:`synthesize_to` for ``(text, language, target)`` items."""
+        if type(self).synthesize_batch is not TTSWrapper.synthesize_batch:
+            return self.synthesize_batch([(t, lang) for t, lang, _ in items])
+        return [self.synthesize_to(t, lang, target) for t, lang, target in items]
+
+    @property
+    def batched(self) -> bool:
+        """Whether this engine synthesises a batch faster than one by one."""
+        return (type(self).synthesize_batch is not TTSWrapper.synthesize_batch
+                or type(self).synthesize_batch_to is not TTSWrapper.synthesize_batch_to)
+
     @abc.abstractmethod
     def unload(self) -> None:
         """Release GPU memory held by this engine."""
@@ -168,6 +192,68 @@ def _synthesize_qwen(
     return wavs[0], sr
 
 
+# Qwen3-TTS 12 Hz codec: one talker step is 1920 samples at 24 kHz = 80 ms.
+QWEN_FRAME_SECONDS = 0.08
+# Past the target length the codec EOS token gets this much extra logit per
+# 10% of overrun.  Measured on Qwen3-TTS 1.7B: 2.0 pulls overruns in by
+# about 5% with no word loss; stronger pressure starts cutting words, and
+# forbidding an early EOS only adds silence, so neither is used.
+QWEN_EOS_PRESSURE = 2.0
+# A clip this far past its target is stopped: Qwen occasionally loops and
+# would otherwise run to max_new_tokens (2048 steps, ~164 s).  Generous on
+# purpose — a line that is merely too long is left whole for the fit check.
+QWEN_RUNAWAY_FACTOR = 3.0
+QWEN_RUNAWAY_SLACK = 2.0   # seconds added to the runaway limit
+
+
+def _qwen_length_processor(model: Any, targets: list[float | None]) -> tuple[Any, int | None]:
+    """``(LogitsProcessorList, max_new_tokens)`` steering each row to its target.
+
+    Rows without a target are left alone.  *max_new_tokens* is ``None``
+    (the model default) unless every row has a target.
+    """
+    import torch
+    from transformers import LogitsProcessor, LogitsProcessorList
+
+    eos = model.model.config.talker_config.codec_eos_token_id
+    inf = float("inf")
+    frames = [t / QWEN_FRAME_SECONDS if t else inf for t in targets]
+    pressure = [QWEN_EOS_PRESSURE if t else 0.0 for t in targets]
+    limits = [f * QWEN_RUNAWAY_FACTOR + QWEN_RUNAWAY_SLACK / QWEN_FRAME_SECONDS if t else inf
+              for f, t in zip(frames, targets)]
+
+    class _Steer(LogitsProcessor):
+        def __init__(self) -> None:
+            self.first_len: int | None = None
+            self.cache: dict = {}
+
+        def _tensors(self, device):
+            if device not in self.cache:
+                self.cache[device] = (
+                    torch.tensor(frames, device=device),
+                    torch.tensor(pressure, device=device),
+                    torch.tensor(limits, device=device),
+                )
+            return self.cache[device]
+
+        def __call__(self, input_ids, scores):
+            if self.first_len is None:
+                self.first_len = input_ids.shape[1]
+            step = float(input_ids.shape[1] - self.first_len)
+            f, p, lim = self._tensors(scores.device)
+            over = torch.clamp(step / f - 1.0, min=0.0)   # 0 for rows without a target
+            scores[:, eos] = scores[:, eos] + p * over * 10.0
+            stop = step >= lim
+            if bool(stop.any()):
+                scores[stop] = -float("inf")
+                scores[stop, eos] = 0.0
+            return scores
+
+    finite = [lim for lim in limits if lim != inf]
+    max_new = int(max(finite)) + 2 if finite and len(finite) == len(limits) else None
+    return LogitsProcessorList([_Steer()]), max_new
+
+
 class _QwenTTSWrapper(TTSWrapper):
 
     engine = "qwen"
@@ -191,6 +277,35 @@ class _QwenTTSWrapper(TTSWrapper):
             text=[t for t, _ in items],
             language=[lang for _, lang in items],
             voice_clone_prompt=self.voice_prompt,
+        )
+        if len(wavs) != len(items):
+            raise RuntimeError(f"Qwen TTS returned {len(wavs)} clips for {len(items)} texts")
+        return [(w, sr) for w in wavs]
+
+    def synthesize_to(
+        self, text: str, language: str = "English", target_dur: float | None = None,
+    ) -> tuple[np.ndarray, int]:
+        return self.synthesize_batch_to([(text, language, target_dur)])[0]
+
+    def synthesize_batch_to(
+        self, items: list[tuple[str, str, float | None]],
+    ) -> list[tuple[np.ndarray, int]]:
+        """One batched call, each row steered toward its target length."""
+        if not items:
+            return []
+        for _, lang, _ in items:
+            validate_language(lang)
+        targets = [t for _, _, t in items]
+        if not any(targets):
+            return self.synthesize_batch([(t, lang) for t, lang, _ in items])
+        processor, max_new = _qwen_length_processor(self.model, targets)
+        kw = {"max_new_tokens": max_new} if max_new else {}
+        wavs, sr = self.model.generate_voice_clone(
+            text=[t for t, _, _ in items],
+            language=[lang for _, lang, _ in items],
+            voice_clone_prompt=self.voice_prompt,
+            logits_processor=processor,
+            **kw,
         )
         if len(wavs) != len(items):
             raise RuntimeError(f"Qwen TTS returned {len(wavs)} clips for {len(items)} texts")
@@ -419,7 +534,58 @@ def _load_omnivoice_model(
     return model
 
 
-class _OmniVoiceTTSWrapper(TTSWrapper):
+# OmniVoice forced to a duration fills it with speech plus edge silence;
+# measured: asking for 5% more than the target gives speech of about the
+# target.  Faster than 1.3x its natural pace it starts to rush, and a
+# duration longer than natural only adds silence, so the request is kept
+# inside [natural / 1.3, natural]; assembly stretches the rest.
+OMNIVOICE_DURATION_PAD = 1.05
+OMNIVOICE_MAX_SPEEDUP = 1.3
+
+
+class _OmniVoiceDuration:
+    """Target-length support shared by the OmniVoice wrappers."""
+
+    model: Any
+    _duration_kw: dict = {}
+
+    def _clone_prompt(self) -> Any:
+        return getattr(self, "_voice_clone_prompt", None)
+
+    def natural_duration(self, text: str) -> float | None:
+        """OmniVoice's own estimate of *text*'s natural length (seconds)."""
+        try:
+            prompt = self._clone_prompt()
+            ref_text = getattr(prompt, "ref_text", None)
+            ref_tokens = getattr(prompt, "ref_audio_tokens", None)
+            n = self.model._estimate_target_tokens(
+                text, ref_text, ref_tokens.size(-1) if ref_tokens is not None else None,
+            )
+            return n / self.model.audio_tokenizer.config.frame_rate
+        except Exception:  # noqa: BLE001 — private API; no estimate is fine
+            return None
+
+    def _duration_for(self, text: str, target_dur: float | None) -> float | None:
+        if not target_dur:
+            return None
+        want = target_dur * OMNIVOICE_DURATION_PAD
+        natural = self.natural_duration(text)
+        if natural:
+            want = min(max(want, natural / OMNIVOICE_MAX_SPEEDUP), natural)
+        return want
+
+    def synthesize_to(
+        self, text: str, language: str = "English", target_dur: float | None = None,
+    ) -> tuple[np.ndarray, int]:
+        duration = self._duration_for(text, target_dur)
+        self._duration_kw = {"duration": duration} if duration else {}
+        try:
+            return self.synthesize(text, language)  # type: ignore[attr-defined]
+        finally:
+            self._duration_kw = {}
+
+
+class _OmniVoiceTTSWrapper(_OmniVoiceDuration, TTSWrapper):
     """OmniVoice in voice-clone mode — clones the speaker from ``ref_audio``.
 
     The reference audio is encoded into a reusable
@@ -442,7 +608,7 @@ class _OmniVoiceTTSWrapper(TTSWrapper):
 
     def synthesize(self, text: str, language: str = "English") -> tuple[np.ndarray, int]:
         audio_list = self.model.generate(
-            text=text, voice_clone_prompt=self._voice_clone_prompt,
+            text=text, voice_clone_prompt=self._voice_clone_prompt, **self._duration_kw,
         )
         if not audio_list:
             raise RuntimeError(
@@ -497,7 +663,7 @@ def _omnivoice_build_clone_prompt(
     )
 
 
-class _OmniVoiceAutoTTSWrapper(TTSWrapper):
+class _OmniVoiceAutoTTSWrapper(_OmniVoiceDuration, TTSWrapper):
     """OmniVoice in auto-voice mode — the model picks a voice automatically.
 
     The model would otherwise sample a different random voice on every
@@ -516,13 +682,13 @@ class _OmniVoiceAutoTTSWrapper(TTSWrapper):
     def synthesize(self, text: str, language: str = "English") -> tuple[np.ndarray, int]:
         if self._voice_clone_prompt is not None:
             audio_list = self.model.generate(
-                text=text, voice_clone_prompt=self._voice_clone_prompt,
+                text=text, voice_clone_prompt=self._voice_clone_prompt, **self._duration_kw,
             )
         else:
             log.info(
                 "OmniVoice auto-voice: generating first segment to lock the voice"
             )
-            audio_list = self.model.generate(text=text)
+            audio_list = self.model.generate(text=text, **self._duration_kw)
 
         if not audio_list:
             raise RuntimeError(
@@ -557,7 +723,7 @@ class _OmniVoiceAutoTTSWrapper(TTSWrapper):
         log.info("OmniVoice model unloaded, GPU memory freed.")
 
 
-class _OmniVoiceDesignTTSWrapper(TTSWrapper):
+class _OmniVoiceDesignTTSWrapper(_OmniVoiceDuration, TTSWrapper):
     """OmniVoice voice-design mode — voice controlled via instruct string.
 
     The ``instruct`` text only describes voice *characteristics* (gender,
@@ -579,14 +745,14 @@ class _OmniVoiceDesignTTSWrapper(TTSWrapper):
     def synthesize(self, text: str, language: str = "English") -> tuple[np.ndarray, int]:
         if self._voice_clone_prompt is not None:
             audio_list = self.model.generate(
-                text=text, voice_clone_prompt=self._voice_clone_prompt,
+                text=text, voice_clone_prompt=self._voice_clone_prompt, **self._duration_kw,
             )
         else:
             log.info(
                 "OmniVoice voice-design: generating first segment with "
                 "instruct=%r to lock the voice", self.instruct,
             )
-            audio_list = self.model.generate(text=text, instruct=self.instruct)
+            audio_list = self.model.generate(text=text, instruct=self.instruct, **self._duration_kw)
 
         if not audio_list:
             raise RuntimeError(
@@ -737,8 +903,12 @@ def synthesize_one(
     language: str = "English",
     *,
     model: Any = None,
+    target_dur: float | None = None,
 ) -> tuple[str, float]:
     """Synthesise *text* into a WAV at *out_path*, overwriting any existing file.
+
+    With *target_dur*, engines that can control length aim at that many
+    seconds of speech (see :meth:`TTSWrapper.synthesize_to`).
 
     Parameters:
         voice_prompt: A :class:`TTSWrapper` from :func:`create_voice_prompt`,
@@ -756,7 +926,10 @@ def synthesize_one(
         raise ValueError("Cannot synthesise empty text")
 
     if isinstance(voice_prompt, TTSWrapper):
-        audio_data, sr = voice_prompt.synthesize(text, language)
+        if target_dur:
+            audio_data, sr = voice_prompt.synthesize_to(text, language, target_dur)
+        else:
+            audio_data, sr = voice_prompt.synthesize(text, language)
     else:
         if model is None:
             raise ValueError("A legacy Qwen voice prompt needs the loaded model")
@@ -781,6 +954,21 @@ def write_segment(out_path: str, audio: np.ndarray, sr: int) -> float:
     return len(audio) / sr
 
 
+# Lines per batched TTS call for engines that batch (Qwen3-TTS: ~3x faster
+# than one by one at 8).  Lines are sorted by length so a batch holds
+# similar lengths and little time is spent on padding.
+TTS_BATCH_SIZE = 8
+
+
+def speech_duration(path: str) -> float:
+    """Seconds of speech in the WAV at *path* (see :func:`mazinger.speech.clip_extent`)."""
+    from mazinger.speech import clip_extent
+
+    audio, sr = sf.read(path, dtype="float32", always_2d=True)
+    i0, i1 = clip_extent(audio.mean(axis=1), sr)
+    return (i1 - i0) / sr
+
+
 def synthesize_segments(
     model: Any,
     voice_prompt: TTSWrapper | Any,
@@ -789,6 +977,8 @@ def synthesize_segments(
     *,
     language: str = "English",
     force_reset: bool = False,
+    targets: dict[str, float] | None = None,
+    batch_size: int = TTS_BATCH_SIZE,
 ) -> list[dict]:
     """Generate TTS audio for each SRT entry and save as WAV files.
 
@@ -803,11 +993,20 @@ def synthesize_segments(
         force_reset:  When ``True``, delete all existing segment files in
                       *output_dir* before generating, so every segment is
                       re-synthesised from scratch.
+        targets:      Seconds of speech to aim at per entry ``idx`` (the
+                      original speech each line replaces).  Engines with
+                      length control use it; every segment then also gets
+                      ``speech_dur`` (its sound, edge silence excluded) and
+                      ``target_dur`` is the target instead of the SRT span.
+        batch_size:   Lines per call for engines that synthesise in batches.
 
     Returns:
         A list of segment info dicts with keys ``idx``, ``start``, ``end``,
-        ``target_dur``, ``wav_path``, and ``actual_dur``.
+        ``target_dur``, ``wav_path``, and ``actual_dur`` (plus
+        ``speech_dur`` with *targets*).
     """
+    from mazinger.speech import clip_extent
+
     if force_reset and os.path.isdir(output_dir):
         import glob
         for f in glob.glob(os.path.join(output_dir, "seg_*.wav")):
@@ -820,6 +1019,8 @@ def synthesize_segments(
 
     for entry in srt_entries:
         target_dur = entry["end"] - entry["start"]
+        if targets and targets.get(entry["idx"]):
+            target_dur = targets[entry["idx"]]
         text = entry["text"].strip()
         wav_path = os.path.join(output_dir, f"seg_{entry['idx'].zfill(4)}.wav")
 
@@ -836,44 +1037,78 @@ def synthesize_segments(
             actual_dur = sf.info(wav_path).duration
             log.debug("Skipping existing segment %s (%.2fs)", wav_path, actual_dur)
             rec.update(wav_path=wav_path, actual_dur=actual_dur, _skipped=True)
+            if targets is not None:
+                rec["speech_dur"] = speech_duration(wav_path)
         else:
             rec.update(wav_path=wav_path, actual_dur=0)
             pending.append((len(segment_info), text, wav_path))
 
         segment_info.append(rec)
 
-    # Synthesize pending segments one-by-one, saving each WAV immediately
-    # so that already-produced files survive a crash and are cached on retry.
+    def _store(seg_idx: int, wav_path: str, audio: np.ndarray, sr: int) -> None:
+        rec = segment_info[seg_idx]
+        rec["actual_dur"] = write_segment(wav_path, audio, sr)
+        if targets is not None:
+            i0, i1 = clip_extent(audio, sr)
+            rec["speech_dur"] = (i1 - i0) / sr
+
+    # Synthesize pending segments, saving each WAV as soon as it exists so
+    # that already-produced files survive a crash and are cached on retry.
     if pending:
         log.info("TTS: %d segments to synthesize (%d cached)",
-                 len(pending), len(srt_entries) - len(pending))
+                 len(pending), sum(1 for r in segment_info if r.get("_skipped")))
         total = len(pending)
+        want = (lambda i: segment_info[i]["target_dur"]) if targets else (lambda i: None)
+        batched = isinstance(voice_prompt, TTSWrapper) and voice_prompt.batched and batch_size > 1
 
-        for i, (seg_idx, text, wav_path) in enumerate(pending, 1):
-            log.info("Synthesising segment %d/%d", i, total)
-            _, actual_dur = synthesize_one(
-                voice_prompt, text, wav_path, language, model=model,
-            )
-            segment_info[seg_idx]["actual_dur"] = actual_dur
+        if batched:
+            ordered = sorted(pending, key=lambda p: len(p[1]))
+            done = 0
+            for b in range(0, total, batch_size):
+                group = ordered[b:b + batch_size]
+                log.info("Synthesising segments %d-%d/%d (batch of %d)",
+                         done + 1, done + len(group), total, len(group))
+                try:
+                    results = voice_prompt.synthesize_batch_to(
+                        [(text, language, want(i)) for i, text, _ in group])
+                except Exception as exc:  # noqa: BLE001 — e.g. OOM: retry one by one
+                    log.warning("Batch synthesis failed (%s); retrying one by one", exc)
+                    results = [voice_prompt.synthesize_to(text, language, want(i))
+                               for i, text, _ in group]
+                for (seg_idx, _, wav_path), (audio, sr) in zip(group, results):
+                    _store(seg_idx, wav_path, audio, sr)
+                done += len(group)
+        else:
+            for n, (seg_idx, text, wav_path) in enumerate(pending, 1):
+                log.info("Synthesising segment %d/%d", n, total)
+                if isinstance(voice_prompt, TTSWrapper):
+                    audio, sr = voice_prompt.synthesize_to(text, language, want(seg_idx))
+                    _store(seg_idx, wav_path, audio, sr)
+                else:
+                    _, actual = synthesize_one(voice_prompt, text, wav_path, language, model=model)
+                    segment_info[seg_idx]["actual_dur"] = actual
+                    if targets is not None:
+                        segment_info[seg_idx]["speech_dur"] = speech_duration(wav_path)
 
     produced = sum(1 for s in segment_info if s["wav_path"])
     skipped = sum(1 for s in segment_info if s.get("_skipped"))
+    key = "speech_dur" if targets is not None else "actual_dur"
     overflow_segs = [
         s for s in segment_info
-        if s["wav_path"] and s["actual_dur"] > s["target_dur"] * 1.05
+        if s["wav_path"] and s.get(key, s["actual_dur"]) > s["target_dur"] * 1.05
     ]
     log.info(
         "Synthesised %d/%d segments (%d cached) -> %s",
         produced, len(srt_entries), skipped, output_dir,
     )
     if overflow_segs:
-        total_overflow = sum(s["actual_dur"] - s["target_dur"] for s in overflow_segs)
+        total_overflow = sum(s.get(key, s["actual_dur"]) - s["target_dur"] for s in overflow_segs)
         log.warning(
             "%d/%d segments exceed target duration (total overflow: %.2fs). "
             "Segments: %s",
             len(overflow_segs), len(srt_entries), total_overflow,
             ", ".join(
-                f'{s["idx"]}({s["actual_dur"]:.1f}s/{s["target_dur"]:.1f}s)'
+                f'{s["idx"]}({s.get(key, s["actual_dur"]):.1f}s/{s["target_dur"]:.1f}s)'
                 for s in overflow_segs
             ),
         )

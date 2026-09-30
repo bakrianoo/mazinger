@@ -74,6 +74,8 @@ def harness(tmp_path, monkeypatch):
     monkeypatch.setattr(assemble, "post_process", lambda src, orig, out, **kw: out)
     monkeypatch.setattr("mazinger.pipeline.get_audio_duration", lambda p: 10.0)
     monkeypatch.setattr(MazingerDubber, "_llm_client", lambda self: FakeLLMClient())
+    # Sync mode's speech map (Demucs + VAD) is not under test here.
+    monkeypatch.setattr("mazinger.speech.project_speech_map", lambda proj: (None, None, None))
 
     def _generate_profile(theme, language, output_dir, **kw):
         wav = write_tone(os.path.join(output_dir, "voice.wav"), 5.0)
@@ -139,7 +141,7 @@ class TestRunRecord:
         assert info["tts"]["model"] == "Qwen/Qwen3-TTS-12Hz-1.7B-Base"
         assert info["tts"]["language"] == "Spanish"
         assert info["assembly"] == {
-            "tempo_mode": "fixed", "fixed_tempo": 1.1, "max_tempo": 1.3,
+            "tempo_mode": "fixed", "fixed_tempo": 1.1, "max_tempo": 1.3, "min_tempo": 0.8,
             "fit_check": True, "fit_max_ratio": 1.15, "fit_rounds": 2,
             "loudness_match": True, "mix_background": True, "background_volume": 0.2,
         }

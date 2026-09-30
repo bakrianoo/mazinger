@@ -74,7 +74,7 @@ The table shows 50 rows per page:
 | **Start**, **End** | Time slot (`m:ss.ss` or `h:mm:ss.ss`) |
 | **Transcription** / **Translation** | Text, shortened to fit the table |
 | **Status** | Every flag on the chunk (see below) |
-| **Fit** | Dub length ÷ slot length. Above 115% the dub must be sped up or trimmed to fit |
+| **Fit** | Dub length ÷ slot length. Above 115% the dub must be sped up or trimmed to fit. In `sync` mode the slot is the original speech the chunk replaces, and the dub length is its speech without edge silence |
 
 Status flags:
 
@@ -242,10 +242,14 @@ with this version of Mazinger already keep that segment.
 
 **🎬 Assemble** rebuilds the output from the session:
 
-1. Every chunk's current dub is placed at its start time. Tempo is adjusted
-   with the dub's settings: overruns are sped up (up to the max tempo) and
-   short dubs slowed slightly. Anything that still overruns is trimmed at a
-   quiet point.
+1. Every chunk's current dub is placed with the dub's tempo settings. In
+   `sync` mode (the default for new dubs), each dub is fitted to the length
+   of the original speech the chunk replaces and placed at that speech's
+   onset, and the output is exactly as long as the source; moving a chunk's
+   boundaries moves the speech it is matched to. In the other modes, a dub
+   is placed at its start time, overruns are sped up (up to the max tempo)
+   and short dubs slowed slightly. Anything that still overruns is trimmed
+   at a quiet point.
 2. Loudness is matched to the source, and the background is mixed in. The
    background is separated once and cached, and so is the source's loudness,
    so later assemblies skip both.

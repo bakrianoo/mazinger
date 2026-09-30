@@ -34,7 +34,7 @@ REDUB_BATCH_SIZE = 4
 DISPLAY_MAX_CHARS = 42
 
 ASSEMBLY_DEFAULTS = dict(
-    tempo_mode="auto", fixed_tempo=None, max_tempo=1.5,
+    tempo_mode="auto", fixed_tempo=None, max_tempo=1.5, min_tempo=0.8,
     loudness_match=True, mix_background=True, background_volume=0.15,
 )
 
@@ -523,7 +523,7 @@ def redub(
     with gpu_lock.hold("an Editor re-dub"):
         voice = res.voice()
         language = res.tts_language
-        batched = type(voice).synthesize_batch is not tts.TTSWrapper.synthesize_batch
+        batched = isinstance(voice, tts.TTSWrapper) and voice.batched
         if not total:
             yield Progress("Re-dub", 0, 0, message="Nothing to do")
             return
@@ -545,10 +545,13 @@ def redub(
                 else:
                     texts[cid] = text
 
+            # Sync mode: aim each chunk at the original speech it replaces.
+            targets = {cid: session.chunk(cid).target for cid in texts} if session.sync else {}
             audio: dict[str, tuple] = {}
             if batched and len(texts) > 1:
                 try:
-                    results = voice.synthesize_batch([(t, language) for t in texts.values()])
+                    results = voice.synthesize_batch_to(
+                        [(t, language, targets.get(cid)) for cid, t in texts.items()])
                     audio = dict(zip(texts, results))
                 except Exception as exc:  # noqa: BLE001 — retry one by one
                     log.warning("Batch re-dub failed (%s); retrying chunk by chunk", exc)
@@ -563,7 +566,10 @@ def redub(
                         data, sr = audio[cid]
                         dur = tts.write_segment(path, data, sr)
                     else:
-                        _, dur = tts.synthesize_one(voice, texts[cid], path, language)
+                        _, dur = tts.synthesize_one(voice, texts[cid], path, language,
+                                                    target_dur=targets.get(cid))
+                    if session.sync:
+                        dur = tts.speech_duration(path)
                     if session.chunk(cid).target_text != texts[cid]:
                         raise RuntimeError("The translation changed while it was dubbed")
                     changed = session.apply_dub(cid, path, dur)
@@ -718,14 +724,24 @@ def assemble(session: Session, *, settings: dict | None = None) -> Iterator[Prog
         yield Progress(op, 0, total, message=f"Building the timeline: {note}")
 
         duration = session.duration or get_audio_duration(proj.audio)
+        sync = opts["tempo_mode"] == "sync"
+        speech_map = vocals = None
+        if sync:
+            from mazinger.speech import project_speech_map
+            speech_map, vocals, _ = project_speech_map(proj)
+            if speech_map is not None:
+                duration = speech_map.duration
         tmp_wav = os.path.join(proj.tts_dir, "dubbed.editor.tmp.wav")
         tmp_mp4 = os.path.join(proj.tts_dir, "dubbed.editor.tmp.mp4")
         tmp_srt = proj.final_srt + ".editor.tmp"
+        report = os.path.splitext(proj.final_audio)[0] + ".sync.json"
+        tmp_report = report + ".editor.tmp"
         try:
             asm.assemble_timeline(
                 segs, duration, tmp_wav,
                 tempo_mode=opts["tempo_mode"], fixed_tempo=opts["fixed_tempo"],
-                max_tempo=opts["max_tempo"],
+                max_tempo=opts["max_tempo"], min_tempo=opts["min_tempo"],
+                speech_map=speech_map, vocals_path=vocals, report_path=tmp_report,
             )
             yield Progress(op, 1, total, message="Mixing: loudness and background")
 
@@ -737,7 +753,13 @@ def assemble(session: Session, *, settings: dict | None = None) -> Iterator[Prog
                     background_volume=opts["background_volume"],
                     background_cache=proj.background_audio(asm.TARGET_SR),
                     loudness_cache=proj.source_loudness,
+                    voice_reference=vocals, exact=sync,
                 )
+            if sync and os.path.isfile(proj.video):
+                import soundfile as sf
+                frames = int(round(get_audio_duration(proj.video) * asm.TARGET_SR))
+                if frames > sf.info(tmp_wav).frames:
+                    asm.force_length(tmp_wav, frames)
             yield Progress(op, 2, total, message="Writing subtitles")
 
             targets = [(c.start, c.end, c.target_text) for c in session.chunks if c.has_text]
@@ -768,6 +790,8 @@ def assemble(session: Session, *, settings: dict | None = None) -> Iterator[Prog
 
             _install(tmp_wav, proj.final_audio)
             _install(tmp_srt, proj.final_srt)
+            if os.path.exists(tmp_report):
+                os.replace(tmp_report, report)
             outputs = {"audio": proj.final_audio, "srt": proj.final_srt,
                        "source_srt": edited_source, "display_srt": display_srt}
             if video_out:
@@ -777,7 +801,7 @@ def assemble(session: Session, *, settings: dict | None = None) -> Iterator[Prog
                 if os.path.isfile(prev_path(path)):
                     outputs[key] = prev_path(path)
         finally:
-            for tmp in (tmp_wav, tmp_mp4, tmp_srt):
+            for tmp in (tmp_wav, tmp_mp4, tmp_srt, tmp_report):
                 if os.path.exists(tmp):
                     os.remove(tmp)
 

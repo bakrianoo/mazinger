@@ -238,19 +238,25 @@ Controls how dubbed audio segments fit into the original timeline.
 
 | Mode | CLI flags | Behavior |
 |------|-----------|----------|
-| Default (auto) | *(none)* | Per-segment matching in both directions — speed up segments that overflow their window, slow down ones that fall well short |
-| Dynamic | `--dynamic-tempo` | Currently identical to the default; both resolve to the same code path |
+| Sync (default) | *(none)*, or `--tempo-mode sync` | Exact dubbing: each line is fitted to the length of the original speech it replaces and placed at its onset; the output is exactly as long as the source (see [Pipeline → Assemble](pipeline.md#9-assemble)) |
+| Auto | `--tempo-mode auto` | Fit to subtitle slots — speed up segments that overflow their window, slow down ones that fall well short |
+| Dynamic | `--dynamic-tempo` | Currently identical to `auto`; both resolve to the same code path |
 | Fixed | `--fixed-tempo 1.1` | Constant multiplier applied to all segments |
-| Off | neither flag, set `tempo_mode="off"` in Python | No speed adjustment — segments placed as-is |
+| Off | `--tempo-mode off` | No speed adjustment — segments placed as-is |
 
-`--max-tempo` (default: `1.5`) caps the speed-up ratio. Slow-down is capped
-separately so speech never drags, and is skipped when the correction would be
-negligible.
+`--max-tempo` (default: `1.5`) caps the speed-up ratio. In `sync` mode,
+`--min-tempo` (default: `0.8`) is the slowest a line is stretched; shorter
+lines end early instead. In the other modes slow-down is capped separately so
+speech never drags, and is skipped when the correction would be negligible.
 
-> `--dynamic-tempo` is currently a no-op: `auto` already does per-segment
-> matching in both directions. The flag is kept for backwards compatibility.
+An explicit `--tempo-mode` wins over `--fixed-tempo` and `--dynamic-tempo`;
+between those two, fixed tempo takes precedence.
 
-If both `--fixed-tempo` and `--dynamic-tempo` are given, fixed tempo takes precedence.
+`sync` works best with `demucs` installed (part of `mazinger[all]`): speech is
+then detected on the separated vocals, the dub's loudness is matched to the
+original voice, and the original music and effects are kept at their own
+level. Without it, speech is detected on the mix and the background falls
+back to spectral masking at 0.15.
 
 ## Translation Tuning
 

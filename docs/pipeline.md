@@ -56,6 +56,15 @@ The raw transcription is saved as `source.raw.srt`. A cleaned-up version with ba
 **Inputs:** `source/audio.mp3`
 **Outputs:** `transcription/source.raw.srt`, `transcription/source.srt`
 
+### 2a. Speech map (`sync` mode)
+
+Finds where the original speaker actually talks. When `demucs` is installed, the source is separated once into a vocals stem and a background stem (both cached in `source/`, and the background is reused by the mix), and voice-activity detection (Silero, shipped with faster-whisper; an energy detector otherwise) runs on the vocals, so music under the voice does not read as speech.
+
+Every line then gets the **speech span** it replaces: its speech's real onset and offset, found from the detected regions that overlap the line, reaching up to 0.3 s beyond the subtitle timestamps but never into a neighbouring line. Subtitle timestamps carry lead-in and trailing silence and are rearranged by re-segmentation; the speech span is the timing reference for translation (6), TTS (8), the fit check (8b) and assembly (9).
+
+**Inputs:** `source/audio.mp3`
+**Outputs:** `source/vocals.24000.wav`, `source/background.24000.wav`, `source/stems.json`, `source/speech_map.json`
+
 ### 3. Thumbnails
 
 Sends the full SRT transcript to an LLM and asks it to select timestamps where the visual content is most relevant to the spoken content. Then uses ffmpeg to extract JPEG frames at those timestamps.
@@ -105,7 +114,7 @@ Each entry gets a length target calculated as:
 target = duration_seconds × words_per_second × duration_budget
 ```
 
-By default `words_per_second` is the TTS speech rate of the target language (e.g. 3.2 for English), and the budget is 0.85 (85% of available time). Chinese and Japanese are budgeted in characters per second instead of words. The target is a soft limit: the model is told to stay at or under it without dropping content, and assembly speeds up small overruns. Entries that come back missing or unparseable are retried once before the original text is kept.
+By default `words_per_second` is the TTS speech rate of the target language (e.g. 3.2 for English), and the budget is 0.85 (85% of available time). In `sync` mode, `duration_seconds` is the line's measured speech (stage 2a) rather than its subtitle span, and the budget is 0.95, since there is no silence left in it. Chinese and Japanese are budgeted in characters per second instead of words. The target is a soft limit: the model is told to stay at or under it without dropping content, and assembly speeds up small overruns. Entries that come back missing or unparseable are retried once before the original text is kept.
 
 Thumbnails and the content description are included in the LLM prompt so translations stay grounded in what is visually on screen.
 
@@ -136,6 +145,14 @@ Generates a WAV file for each subtitle entry using voice-cloned TTS.
 
 **Voice themes** offer a fourth option: instead of providing a voice sample, pass `--voice-theme` to select from 16 pre-defined themes (e.g. `narrator-m`, `warm-f`, `kid-m`). The theme generates a reference voice via Qwen3-TTS VoiceDesign. When used with `dub` or `speak`, the generated profile is saved to the project's `voice_profile/` directory and reused on subsequent runs.
 
+In `sync` mode every line also gets a target length — the original speech it replaces — which engines with length control use:
+
+- **OmniVoice** generates at that duration directly (never more than 1.3× its natural pace, and never longer than natural, which would only add silence).
+- **Qwen3-TTS** gets a gentle push toward ending near the target, and a hard stop for runaway generations that would otherwise run for minutes.
+- **Chatterbox** and **MLX** have no length control; assembly stretches them.
+
+Engines that batch (Qwen3-TTS) synthesise 8 lines per call, sorted by length so a batch carries little padding — about 3× faster than one by one.
+
 Each segment is saved individually (`seg_0001.wav`, `seg_0002.wav`, ...) so interrupted runs can resume without re-synthesizing completed segments.
 
 **Inputs:** `subtitles/translated.srt`, voice sample + optional transcript (or `--voice-theme`)
@@ -143,31 +160,44 @@ Each segment is saved individually (`seg_0001.wav`, `seg_0002.wav`, ...) so inte
 
 ### 8b. Fit check
 
-Compares each segment's speech with the time it may occupy (up to the next segment). Lines that would need more than 1.15× speed-up are sent to the LLM in one batch to be rewritten shorter — tighter phrasing, same content, never more than 30% shorter per round — and re-synthesised. A rewrite is kept only if its audio is actually shorter, and `subtitles/translated.srt` is updated to the spoken text. At most two rounds run, and only overflowing lines cost time. Disable with `--no-fit-check` (CLI), `fit_check=False` (Python), or the **Fit check** box in Studio's Audio tab.
+Compares each segment's speech with the time it may occupy (up to the next segment; in `sync` mode, the length of the original speech it replaces). Lines that would need more than 1.15× speed-up are sent to the LLM in one batch to be rewritten shorter — tighter phrasing, same content, never more than 30% shorter per round — and re-synthesised. A rewrite is kept only if its audio is actually shorter, and `subtitles/translated.srt` is updated to the spoken text. At most two rounds run, and only overflowing lines cost time. Disable with `--no-fit-check` (CLI), `fit_check=False` (Python), or the **Fit check** box in Studio's Audio tab.
 
 ### 9. Assemble
 
-Places all segment WAVs onto a silence-filled timeline that matches the original audio duration. Optionally applies tempo adjustment using ffmpeg to make segments fit their allocated time windows.
+Places all segment WAVs onto a timeline of the original's length and fits each one to its time.
 
 Tempo modes:
 
 | Mode | Behavior |
 |------|----------|
-| `auto` (default) | Per-segment matching in both directions: speed up segments that overflow their window (capped at `--max-tempo`), and slow down segments that fall well short of it |
+| `sync` (default) | Exact dubbing. Each line is fitted to the length of the **original speech** it replaces (from the speech map, stage 2a) and starts exactly where that speech started. See below |
+| `auto` | Fit to subtitle slots: speed up segments that overflow the gap to the next subtitle (capped at `--max-tempo`), and slow down segments that fall well short of it |
 | `dynamic` | Currently identical to `auto` — both resolve to the same code path |
 | `fixed` | Apply a constant multiplier to all segments (e.g., 1.1×) |
 | `off` | No tempo change — place segments as-is |
 
-Slow-down never targets a 100% fill; it stretches toward a partial fill of the
-window so speech does not become sluggish, and is skipped entirely when the
-correction would be negligible.
+**`sync` in detail.** For every line:
+
+1. The clip's own leading and trailing silence is removed, measured with the same VAD as the source, so a breath before the first word does not shift the line.
+2. It is time-stretched (ffmpeg `rubberband` when available, `atempo` otherwise) to exactly the length of the original speech, then padded or trimmed to the exact sample count.
+3. It is placed at the original speech's onset.
+
+When a line spans several original phrases (re-segmentation merges sentences, and long segment mode builds 8–30 s chunks), a single stretch would talk straight through the speaker's pauses. The clip is then fitted **phrase by phrase**: its own pauses (at commas and full stops) are matched to the original's by where they fall in the line, and each piece is stretched onto its original phrase, so the dub pauses where the speaker paused. When the pauses do not match, or a piece would need a stretch outside the tempo limits, the whole line is fitted as one.
+
+A clip that needs more than `--max-tempo` is stretched to that limit and may run into the pause that follows (never into the next line; beyond that it is cut at the quietest point). A clip that needs slowing below `--min-tempo` (default 0.8) is stretched to that limit and ends early. The fit check (8b) rewrites lines before it comes to either. Lines with no speech under them at all — ASR hallucinations over music, like *"you"* or *"Thank you."* — are not dubbed. When many lines look like that, the speech map is treated as unreliable and every line is dubbed.
+
+The timeline has exactly the source's sample count (the decoded length, not the container's estimate), and with video output it is padded to the video's length. Short vocal sounds that no line covers — laughs, breaths, a word the ASR skipped, up to 2 s — are copied from the original vocals stem, so they stay in the dub. A per-line report is written beside the output as `dubbed.sync.json`.
+
+In the other modes, slow-down never targets a 100% fill; it stretches toward a
+partial fill of the window so speech does not become sluggish, and is skipped
+entirely when the correction would be negligible.
 
 After placement, two post-processing steps run by default:
 
-- **Loudness matching** — measures the original audio's integrated loudness (LUFS) and normalises the dubbed track to the same level via ffmpeg `loudnorm`.
-- **Background mixing** — extracts non-vocal audio (music, ambience) from the original and mixes it beneath the dubbed voice. Uses `demucs` when available, otherwise a centre-cancel technique.
+- **Loudness matching** — measures the original audio's integrated loudness (LUFS) and normalises the dubbed track to the same level via ffmpeg `loudnorm`. In `sync` mode with Demucs, the reference is the original **vocals stem**, since the dub replaces only the voice.
+- **Background mixing** — extracts non-vocal audio (music, ambience) from the original and mixes it beneath the dubbed voice. Uses `demucs` when available, otherwise a centre-cancel technique. In `sync` mode with Demucs, the background is the original's own music-and-effects track and is mixed at its original level (1.0), under a limiter, with the output's length and timing unchanged.
 
-Both can be disabled with `--no-loudness-match` and `--no-mix-background`. The background level is tuneable with `--background-volume` (default 0.15).
+Both can be disabled with `--no-loudness-match` and `--no-mix-background`. The background level is tuneable with `--background-volume` (default: 1.0 in `sync` mode with Demucs, 0.15 otherwise).
 
 **Inputs:** `tts/segments/seg_NNNN.wav`, original audio duration, `source/audio.mp3`
 **Outputs:** `tts/dubbed.wav`

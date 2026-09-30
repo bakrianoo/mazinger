@@ -329,16 +329,22 @@ mazinger transcribe audio.mp3 -o subs.srt --method mlx-whisper
 
 ## Control Playback Speed
 
-By default, dubbed segments are placed at their original timestamps without speed adjustment. Use tempo flags to control pacing:
+By default (`--tempo-mode sync`), every dubbed line is fitted to the length of the original speech it replaces and starts where that speech started, and the output is exactly as long as the source. Use tempo flags to control pacing:
 
 ```bash
+# Fit lines to their subtitle slots instead (the earlier behaviour)
+mazinger speak --srt translated.srt --original-audio audio.mp3 \
+    --clone-profile abubakr \
+    --tempo-mode auto \
+    -o dubbed.wav
+
 # Fixed speed-up: all segments 10% faster
 mazinger speak --srt translated.srt --original-audio audio.mp3 \
     --clone-profile abubakr \
     --fixed-tempo 1.1 \
     -o dubbed.wav
 
-# Per-segment speed matching is the default; cap the speed-up at 1.3×
+# Cap the speed-up at 1.3×
 mazinger speak --srt translated.srt --original-audio audio.mp3 \
     --clone-profile abubakr \
     --max-tempo 1.3 \

@@ -173,7 +173,7 @@ class MazingerDubber:
         omnivoice_model: str = DEFAULT_OMNIVOICE_MODEL,
         loudness_match: bool = True,
         mix_background: bool = True,
-        background_volume: float = 0.15,
+        background_volume: float | None = None,
         cookies_from_browser: str | None = None,
         cookies: str | None = None,
         quality: str | None = None,
@@ -185,9 +185,10 @@ class MazingerDubber:
         segment_mode: str = "short",
         min_segment_duration: float = 8.0,
         max_segment_duration: float = 30.0,
-        tempo_mode: str = "auto",
+        tempo_mode: str = "sync",
         fixed_tempo: float | None = None,
         max_tempo: float = 1.5,
+        min_tempo: float = 0.8,
         words_per_second: float | None = None,
         duration_budget: float | None = None,
         translate_technical_terms: bool = False,
@@ -264,6 +265,18 @@ class MazingerDubber:
                             video output.
             subtitle_source: SRT to burn — ``'translated'`` (default),
                             ``'original'``, or a file path.
+            tempo_mode:     ``sync`` (default) — exact dubbing: each line is
+                            fitted to the length of the original speech it
+                            replaces and placed at its onset (from a speech
+                            map of the source), the output has exactly the
+                            source's length, and untranscribed vocal sounds
+                            are kept.  ``auto`` / ``dynamic`` / ``fixed`` /
+                            ``off`` — the earlier subtitle-slot assembly.
+            min_tempo:      Slowest a line is stretched in ``sync`` mode (0.8);
+                            shorter lines end early instead.
+            background_volume: Level of the original background in the mix.
+                            ``None`` (default): 1.0 — the original level —
+                            in ``sync`` mode with a Demucs stem, else 0.15.
             fit_check:      After TTS, rewrite lines whose speech would need
                             more than *fit_max_ratio* speed-up to fit their
                             slot, and re-synthesise them (default ``True``).
@@ -456,6 +469,20 @@ class MazingerDubber:
 
         transcribe.clear_cache()
 
+        # 2a. Speech map (sync mode) -------------------------------------
+        # Where the original speaker really talks.  Built on the Demucs
+        # vocals stem when Demucs is installed (music then does not read as
+        # speech); the same pass caches the background stem for the mix.
+        sync = tempo_mode == "sync"
+        speech_map = None
+        vocals_path = None
+        stems_method = None
+        if sync:
+            from mazinger.speech import project_speech_map
+            speech_map, vocals_path, stems_method = project_speech_map(proj)
+        if background_volume is None:
+            background_volume = 1.0 if sync and stems_method == "demucs" else 0.15
+
         # 2b. Select best SRT source (ASR vs YouTube) --------------------
         source_srt_for_pipeline = proj.source_srt if use_resegmented else proj.source_raw_srt
 
@@ -575,6 +602,19 @@ class MazingerDubber:
             log.info("OmniVoice auto-voice mode — skipping voice profile extraction")
 
         # 5. Translate ---------------------------------------------------
+        speech_durations = None
+        if sync and speech_map is not None:
+            from mazinger.speech import speech_spans
+            _blocks = parse_blocks(source_srt_text)
+            speech_durations = {
+                idx: sp.duration
+                for (idx, _, _, _), sp in zip(
+                    _blocks, speech_spans([(b[1], b[2]) for b in _blocks], speech_map))
+                if sp.voiced
+            }
+            if duration_budget is None:
+                duration_budget = translate.SYNC_DURATION_BUDGET
+
         if skip_existing and is_valid_srt_file(proj.translated_raw_srt):
             log.info("Skipping translation (file exists)")
             with open(proj.translated_raw_srt, encoding="utf-8") as fh:
@@ -616,6 +656,7 @@ class MazingerDubber:
                 video_meta=video_meta,
                 usage_tracker=usage_tracker,
                 user_instructions=user_instructions,
+                speech_durations=speech_durations,
                 **(dict(words_per_second=words_per_second) if words_per_second is not None else {}),
                 **(dict(duration_budget=duration_budget) if duration_budget is not None else {}),
             )
@@ -690,10 +731,28 @@ class MazingerDubber:
             omnivoice_model=omnivoice_model,
             voice_design_instruct=_omnivoice_instruct,
         )
+        targets = None
+        tts_entries = srt_entries
+        if sync:
+            from mazinger.speech import line_targets
+            targets, unvoiced = line_targets(srt_entries, speech_map)
+            if unvoiced:
+                # Lines over no speech at all are ASR hallucinations on music
+                # or silence ("you", "Thank you."): keep them in the
+                # subtitles, but do not dub them.
+                log.warning(
+                    "Not dubbing %d line(s) with no speech in the source: %s",
+                    len(unvoiced),
+                    ", ".join([f'{e["idx"]} ({e["text"][:30]!r})'
+                               for e in srt_entries if e["idx"] in unvoiced][:8]),
+                )
+                tts_entries = [dict(e, text="") if e["idx"] in unvoiced else e
+                               for e in srt_entries]
         segment_info = tts.synthesize_segments(
-            tts_model, voice_prompt, srt_entries, proj.tts_segments_dir,
+            tts_model, voice_prompt, tts_entries, proj.tts_segments_dir,
             language=tts_language,
             force_reset=force_reset,
+            targets=targets,
         )
 
         # 7a. Fit check — shorten lines whose speech overflows its slot, so
@@ -709,8 +768,9 @@ class MazingerDubber:
                     original_duration=original_duration,
                     srt_path=proj.final_srt,
                     max_fit=fit_max_ratio, rounds=fit_rounds,
-                    max_tempo=max_tempo if tempo_mode in ("auto", "dynamic") else 1.0,
+                    max_tempo=max_tempo if tempo_mode in ("auto", "dynamic", "sync") else 1.0,
                     usage_tracker=usage_tracker,
+                    sync=sync,
                 )
             except Exception as exc:  # noqa: BLE001 — never block the pipeline
                 log.warning("Fit check skipped: %s", exc)
@@ -727,11 +787,16 @@ class MazingerDubber:
                 log.warning("Could not keep an OmniVoice voice reference: %s", exc)
 
         # 8. Assemble final audio ----------------------------------------
+        if sync and speech_map is not None:
+            original_duration = speech_map.duration  # decoded, not a container estimate
         assemble.assemble_timeline(
             segment_info, original_duration, proj.final_audio,
             tempo_mode=tempo_mode,
             fixed_tempo=fixed_tempo,
             max_tempo=max_tempo,
+            min_tempo=min_tempo,
+            speech_map=speech_map,
+            vocals_path=vocals_path if stems_method == "demucs" else None,
         )
 
         # 8b. Post-process: loudness + background -------------------------
@@ -743,7 +808,17 @@ class MazingerDubber:
                 background_volume=background_volume,
                 background_cache=proj.background_audio(assemble.TARGET_SR),
                 loudness_cache=proj.source_loudness,
+                voice_reference=vocals_path if stems_method == "demucs" else None,
+                exact=sync,
             )
+
+        if sync and os.path.exists(proj.video):
+            # Match the video too, so muxing (-shortest) never cuts frames:
+            # the extracted audio track can be a few ms shorter.
+            import soundfile as _sf
+            video_frames = int(round(get_audio_duration(proj.video) * assemble.TARGET_SR))
+            if video_frames > _sf.info(proj.final_audio).frames:
+                assemble.force_length(proj.final_audio, video_frames)
 
         drift = abs(get_audio_duration(proj.final_audio) - original_duration)
         log.info("Done. Final audio: %s (drift: %.3fs)", proj.final_audio, drift)
@@ -823,6 +898,7 @@ class MazingerDubber:
                     tempo_mode=tempo_mode,
                     fixed_tempo=fixed_tempo,
                     max_tempo=max_tempo,
+                    min_tempo=min_tempo,
                     fit_check=fit_check,
                     fit_max_ratio=fit_max_ratio,
                     fit_rounds=fit_rounds,

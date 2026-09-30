@@ -178,6 +178,9 @@ def _count_units(text: str, target_language: str) -> int:
 
 # Fraction of duration-based word count to use as the target.
 DURATION_BUDGET = 0.85
+# In the "sync" tempo mode the budget applies to the line's measured speech,
+# which has no lead-in or trailing silence, so less margin is needed.
+SYNC_DURATION_BUDGET = 0.95
 # Minimum words per segment — shorter budgets produce unusable fragments.
 MIN_TARGET_WORDS = 4
 
@@ -351,15 +354,25 @@ def _technical_terms_instruction(
     )
 
 
+def _block_seconds(
+    idx: str, start: float, end: float, speech_durations: dict[str, float] | None,
+) -> float:
+    """Time a line may speak: its original speech when known, else its span."""
+    if speech_durations and speech_durations.get(idx):
+        return speech_durations[idx]
+    return end - start
+
+
 def _blocks_to_json_entries(
     blocks: list[tuple[str, float, float, str]],
     words_per_second: float = _DEFAULT_WPS,
     duration_budget: float = DURATION_BUDGET,
+    speech_durations: dict[str, float] | None = None,
 ) -> str:
     """Convert blocks to a JSON array of {index, text, target_words} for LLM input."""
     entries = []
     for idx, start, end, text in blocks:
-        dur = end - start
+        dur = _block_seconds(idx, start, end, speech_durations)
         target_words = max(MIN_TARGET_WORDS, round(dur * words_per_second * duration_budget))
         entries.append({
             "index": idx,
@@ -579,6 +592,7 @@ def _validate_word_counts(
     duration_budget: float,
     tolerance: float = 1.5,
     target_language: str = "",
+    speech_durations: dict[str, float] | None = None,
 ) -> list[tuple[str, float, float, str, int, int]]:
     """Return blocks that exceed their word budget by more than *tolerance*.
 
@@ -586,7 +600,7 @@ def _validate_word_counts(
     """
     violations = []
     for idx, start, end, text in translated_blocks:
-        dur = end - start
+        dur = _block_seconds(idx, start, end, speech_durations)
         target = max(MIN_TARGET_WORDS, round(dur * words_per_second * duration_budget))
         actual = _count_units(text, target_language)
         if actual > target * tolerance:
@@ -611,6 +625,7 @@ def translate_srt(
     video_meta: dict | None = None,
     usage_tracker: LLMUsageTracker | None = None,
     user_instructions: str = "",
+    speech_durations: dict[str, float] | None = None,
 ) -> str:
     """Translate an SRT file to the target language using batched LLM calls with visual context.
 
@@ -631,6 +646,11 @@ def translate_srt(
                           into professional target-language equivalents;
                           when ``False`` (default) keep them in the original
                           language.
+        speech_durations: Seconds of original speech per block index (from
+                          the speech map).  When given, a line's length
+                          target is set from its real speech instead of its
+                          subtitle span, which carries lead-in and trailing
+                          silence.
 
     Returns:
         The translated SRT as a string.
@@ -701,7 +721,8 @@ def translate_srt(
         def _translate(blocks):
             msgs = _build_messages(
                 system_prompt,
-                _blocks_to_json_entries(blocks, words_per_second, duration_budget),
+                _blocks_to_json_entries(blocks, words_per_second, duration_budget,
+                                        speech_durations),
                 batch_thumbs, keypoints, keywords, context_before, context_after,
                 target_language=target_language,
                 video_meta=video_meta,
@@ -735,7 +756,7 @@ def translate_srt(
     # Validation report (assembly handles overflow via tempo stretch)
     violations = _validate_word_counts(
         translated_blocks, words_per_second, duration_budget,
-        target_language=target_language,
+        target_language=target_language, speech_durations=speech_durations,
     )
     if violations:
         over_total = sum(a - t for _, _, _, _, a, t in violations)

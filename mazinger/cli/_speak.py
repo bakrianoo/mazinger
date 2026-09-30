@@ -123,17 +123,33 @@ def handler(args: argparse.Namespace) -> None:
         mlx_model=args.mlx_tts_model,
         omnivoice_model=args.omnivoice_model,
     )
+    tempo_mode = tempo_mode_from_args(args)
+    speech_map = vocals = targets = None
+    if tempo_mode == "sync":
+        from mazinger.speech import build_speech_map, line_targets, project_speech_map
+        if proj and os.path.abspath(original_audio) == os.path.abspath(proj.audio):
+            speech_map, vocals, _ = project_speech_map(proj)
+        else:
+            speech_map = build_speech_map(original_audio)
+        targets, unvoiced = line_targets(srt_entries, speech_map)
+        srt_entries = [dict(e, text="") if e["idx"] in unvoiced else e for e in srt_entries]
+        original_duration = speech_map.duration
+
     segment_info = tts.synthesize_segments(
         model, voice_prompt, srt_entries, segments_dir,
         language=args.tts_language or "English",
         force_reset=args.force_reset,
+        targets=targets,
     )
     tts.unload_model(voice_prompt)
 
     assemble.assemble_timeline(
         segment_info, original_duration, output,
-        tempo_mode=tempo_mode_from_args(args),
+        tempo_mode=tempo_mode,
         fixed_tempo=args.fixed_tempo,
         max_tempo=args.max_tempo,
+        min_tempo=args.min_tempo,
+        speech_map=speech_map,
+        vocals_path=vocals,
     )
     print(f"Dubbed audio saved: {output}")
