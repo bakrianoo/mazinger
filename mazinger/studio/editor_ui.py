@@ -681,6 +681,7 @@ def h_save_settings(view: dict, *form) -> dict:
     except (ValueError, OSError) as exc:
         return {"settings_msg": f"❌ {html.escape(str(exc))}"}
     session.run_info = load_run_info(session.proj)
+    session.refresh_targets()
     _RESOURCES.free()
     return {"settings_msg": "✅ Saved to run.json", "settings_group": gr.update(visible=False),
             "status": banner_for(session)}
@@ -890,9 +891,9 @@ def build(dub_api_key: gr.components.Component | None = None) -> EditorTab:
             s_voice_file = gr.File(label="Voice sample", type="filepath", file_types=["audio"])
             s_voice_script = gr.Textbox(label="Voice sample transcript (optional)", lines=3)
         with gr.Row():
-            s_tempo = gr.Dropdown(["auto", "off"], value="auto", label="Tempo")
+            s_tempo = gr.Dropdown(["sync", "auto", "off"], value="sync", label="Tempo")
             s_max_tempo = gr.Slider(1.0, 2.0, value=1.5, step=0.05, label="Max tempo")
-            s_bg_vol = gr.Slider(0.0, 1.0, value=0.15, step=0.05, label="Background volume")
+            s_bg_vol = gr.Slider(0.0, 1.0, value=1.0, step=0.05, label="Background volume")
         with gr.Row():
             s_loud = gr.Checkbox(value=True, label="Match loudness")
             s_mix = gr.Checkbox(value=True, label="Mix background")

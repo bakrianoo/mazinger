@@ -13,6 +13,9 @@ All output files are organized under a single root directory. Each video gets it
         │   ├── audio.mp3                   # Extracted audio track
         │   ├── video_meta.json             # Title, description, channel (downloads)
         │   ├── background.24000.wav        # Cached background (non-vocal) stem
+        │   ├── vocals.24000.wav            # Cached vocals stem (sync mode)
+        │   ├── stems.json                  # How the stems were separated
+        │   ├── speech_map.json             # Where the original speaker talks (sync mode)
         │   └── loudness.json               # Cached loudness of audio.mp3
         ├── transcription/                  # shared
         │   ├── source.raw.srt              # Raw transcription output
@@ -59,6 +62,9 @@ The default `<base_dir>` is `./mazinger_output`. Change it with `--base-dir` or 
 | `video_meta.json` | download | Video title, description, channel and tags, used as translation context |
 | `background.<sr>.wav` | assemble | Background stem separated by Demucs. Shared by every language and reused while it is newer than `audio.mp3` |
 | `loudness.json` | assemble | Integrated loudness of `audio.mp3`, reused while `audio.mp3` keeps its size and modification time |
+| `vocals.<sr>.wav` | speech map | Vocals stem from the same Demucs pass as the background; speech is detected on it, the dub's loudness is matched to it, and short untranscribed sounds are copied from it. `vocals.<sr>.loudness.json` caches its loudness |
+| `stems.json` | speech map | `{"method": "demucs"}` or `"hpss"` — which separation produced the stems |
+| `speech_map.json` | speech map | Voiced regions of the source and its exact decoded duration, rebuilt only when `audio.mp3` or the vocals stem changes |
 
 ### transcription/
 
@@ -122,6 +128,7 @@ Example `description.json`:
 |------|-----------|-------------|
 | `segments/seg_NNNN.wav` | speak | One WAV file per `translated.srt` entry |
 | `dubbed.wav` | assemble | All segments placed on a timeline matching the original duration |
+| `dubbed.sync.json` | assemble (sync) | Per-line report: onset, target and placed length, stretch rate and outcome; plus a summary |
 | `dubbed.mp4` | subtitle / mux | Final video with dubbed audio and optional burned subtitles |
 | `dubbed.prev.wav`, `dubbed.prev.mp4` | Editor | The output before the last Editor assemble |
 

@@ -24,6 +24,9 @@ TARGET_SR = 24_000
 # assemble_timeline.  Most of that time is spent waiting on ffmpeg.
 ASSEMBLE_WORKERS = min(8, os.cpu_count() or 1)
 
+# Slow-down floor of the "sync" tempo mode (see assemble_synced).
+SYNC_MIN_TEMPO_DEFAULT = 0.8
+
 # Formats _load_and_resample reads without ffmpeg.  Lossy formats always go
 # through ffmpeg: decoders disagree on encoder-delay padding.
 _DIRECT_FORMATS = ("WAV", "WAVEX", "RF64", "FLAC", "AIFF")
@@ -229,8 +232,16 @@ def assemble_timeline(
     max_tempo: float = 1.5,
     crossfade_ms: int = 50,
     segment_gap_ms: int = 50,
+    speech_map=None,
+    vocals_path: str | None = None,
+    min_tempo: float = SYNC_MIN_TEMPO_DEFAULT,
+    report_path: str | None = None,
 ) -> str:
     """Assemble per-segment TTS WAVs into a single time-aligned audio file.
+
+    ``tempo_mode="sync"`` hands over to :func:`assemble_synced`: every line
+    is fitted exactly to the original speech it replaces (from
+    *speech_map*) and the output has exactly the original's length.
 
     Smart tempo approach:
       1. Place each segment at its SRT start time.
@@ -260,7 +271,8 @@ def assemble_timeline(
         target_fill:       Target fraction of the time window to fill when
                            slowing down (default 0.92). A value < 1.0 leaves a
                            small natural gap instead of stretching to the edge.
-        tempo_mode:        ``auto`` — speed up overflows AND slow down short
+        tempo_mode:        ``sync`` — exact fit to the original speech (see above);
+                           ``auto`` — speed up overflows AND slow down short
                            segments toward *target_fill* (default);
                            ``off`` — no tempo adjustment;
                            ``dynamic`` — same as auto (legacy alias);
@@ -273,6 +285,14 @@ def assemble_timeline(
     Returns:
         The *output_path*.
     """
+    if tempo_mode == "sync":
+        return assemble_synced(
+            segment_info, original_duration, output_path,
+            speech_map=speech_map, sample_rate=sample_rate,
+            max_tempo=max_tempo, min_tempo=min_tempo, vocals_path=vocals_path,
+            report_path=report_path,
+        )
+
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
 
     # Allow a small tail so the last segment is never hard-clipped.
@@ -489,6 +509,366 @@ def assemble_timeline(
     return output_path
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Exact sync ("sync" tempo mode)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Stretch limits for exact sync.  Inside them a clip is stretched to the
+# exact length of the speech it replaces; outside them it is stretched to
+# the limit, then (when too long) allowed into the silence that follows and
+# only then trimmed.
+SYNC_MAX_TEMPO = 1.35
+SYNC_MIN_TEMPO = SYNC_MIN_TEMPO_DEFAULT
+SYNC_TOLERANCE = 0.01      # |rate - 1| below this is padded/trimmed, not stretched
+SYNC_GAP = 0.04            # silence kept before the next line's onset
+PASSTHROUGH_MAX = 2.0      # longest untranscribed vocal region kept (seconds)
+
+
+def has_rubberband() -> bool:
+    """Whether ffmpeg has the ``rubberband`` filter (higher-quality time stretch)."""
+    global _RUBBERBAND
+    if _RUBBERBAND is None:
+        try:
+            out = subprocess.run(
+                ["ffmpeg", "-hide_banner", "-filters"],
+                capture_output=True, text=True, check=True,
+            ).stdout
+            _RUBBERBAND = any(line.split()[1:2] == ["rubberband"] for line in out.splitlines())
+        except (OSError, subprocess.CalledProcessError):
+            _RUBBERBAND = False
+    return _RUBBERBAND
+
+
+_RUBBERBAND: bool | None = None
+
+
+def _atempo_chain(rate: float) -> str:
+    filters, remaining = [], rate
+    while remaining > 2.0:
+        filters.append("atempo=2.0")
+        remaining /= 2.0
+    while remaining < 0.5:
+        filters.append("atempo=0.5")
+        remaining /= 0.5
+    filters.append(f"atempo={remaining:.6f}")
+    return ",".join(filters)
+
+
+def stretch_audio(audio: np.ndarray, sr: int, rate: float) -> np.ndarray:
+    """Time-stretch mono *audio* by *rate* (``> 1`` is faster), keeping pitch.
+
+    Streams through ffmpeg (no temporary files) using rubberband when
+    available, ``atempo`` otherwise.  The result is ``≈ len(audio) / rate``
+    samples; callers that need an exact length use :func:`fit_length`.
+    """
+    if abs(rate - 1.0) < 1e-4 or not len(audio):
+        return audio
+    filt = f"rubberband=tempo={rate:.6f}" if has_rubberband() else _atempo_chain(rate)
+    result = subprocess.run(
+        ["ffmpeg", "-hide_banner", "-loglevel", "error",
+         "-f", "f32le", "-ar", str(sr), "-ac", "1", "-i", "-",
+         "-af", filt, "-f", "f32le", "-ar", str(sr), "-ac", "1", "-"],
+        input=np.ascontiguousarray(audio, dtype=np.float32).tobytes(),
+        capture_output=True, check=True,
+    )
+    return np.frombuffer(result.stdout, dtype=np.float32).copy()
+
+
+def fit_length(audio: np.ndarray, n: int, sr: int) -> np.ndarray:
+    """*audio* padded with silence or trimmed (with a short fade) to exactly *n* samples."""
+    if len(audio) == n:
+        return audio
+    if len(audio) < n:
+        return np.pad(audio, (0, n - len(audio)))
+    out = audio[:n].copy()
+    fade = min(n, int(sr * 0.01))
+    if fade > 1:
+        out[-fade:] *= np.linspace(1.0, 0.0, fade, dtype=np.float32)
+    return out
+
+
+def _edge_fades(audio: np.ndarray, sr: int, fade_in_ms: float = 5, fade_out_ms: float = 10) -> np.ndarray:
+    fi = min(len(audio) // 2, int(sr * fade_in_ms / 1000))
+    fo = min(len(audio) // 2, int(sr * fade_out_ms / 1000))
+    if fi > 1:
+        audio[:fi] *= np.linspace(0.0, 1.0, fi, dtype=np.float32)
+    if fo > 1:
+        audio[-fo:] *= np.linspace(1.0, 0.0, fo, dtype=np.float32)
+    return audio
+
+
+def sync_plan(
+    natural: float, target: float, room: float, *,
+    max_tempo: float = SYNC_MAX_TEMPO, min_tempo: float = SYNC_MIN_TEMPO,
+    tolerance: float = SYNC_TOLERANCE,
+) -> tuple[float, float, str]:
+    """How to fit a clip of *natural* seconds to *target* seconds.
+
+    *room* is the time available before the next line.  Returns
+    ``(rate, length, outcome)``: the stretch rate, the length to place
+    (seconds), and one of ``exact``, ``sped_up``, ``slowed_down``,
+    ``too_long`` (still longer than the target at *max_tempo*; uses the
+    following silence and is trimmed to *room* at most) or ``too_short``
+    (shorter than the target even at *min_tempo*; ends early).
+    """
+    target = max(target, 1e-3)
+    rate = natural / target
+    if abs(rate - 1.0) <= tolerance:
+        return 1.0, target, "exact"
+    if rate > max_tempo:
+        return max_tempo, min(natural / max_tempo, max(room, target)), "too_long"
+    if rate < min_tempo:
+        return min_tempo, natural / min_tempo, "too_short"
+    return rate, target, "sped_up" if rate > 1.0 else "slowed_down"
+
+
+def _place_phrases(
+    audio: np.ndarray,
+    clip_regions: list[tuple[float, float]],
+    src_phrases: list[tuple[float, float]],
+    onset: float,
+    end: float,
+    sr: int,
+    *,
+    max_tempo: float,
+    min_tempo: float,
+    min_piece: float = 0.25,
+) -> tuple[np.ndarray, int] | None:
+    """Fit a clip to an original line phrase by phrase; ``None`` when it does not map.
+
+    *clip_regions* are the clip's speech regions (seconds, relative to
+    *audio*); *src_phrases* the original phrases of the line (absolute),
+    which run from *onset* to *end*.  The clip's own pauses are matched to
+    the original's by relative position (:func:`mazinger.speech.match_pauses`);
+    each piece between matched pauses is stretched to its original phrase
+    group and placed on it, with the original's pause between pieces.
+    Returns ``(audio, pieces)`` — *audio* starts at *onset* and lasts
+    ``end - onset`` — or ``None`` when there are fewer than two phrases on
+    either side, no pause matches, or a piece would need a stretch outside
+    ``[min_tempo, max_tempo]``.
+    """
+    from mazinger.speech import CLIP_PAUSE, match_pauses, phrases
+
+    if len(src_phrases) < 2:
+        return None
+    clip_ph = phrases(clip_regions, CLIP_PAUSE)
+    if len(clip_ph) < 2:
+        return None
+    pairs = match_pauses(src_phrases, clip_ph)
+    if not pairs:
+        return None
+
+    # Piece boundaries: original [s0, s1] <- clip [c0, c1].
+    src_cuts = [(src_phrases[i][1], src_phrases[i + 1][0]) for i, _ in pairs]
+    clip_cuts = [(clip_ph[j][1], clip_ph[j + 1][0]) for _, j in pairs]
+    src_bounds = [onset] + [x for cut in src_cuts for x in cut] + [end]
+    clip_bounds = [clip_ph[0][0]] + [x for cut in clip_cuts for x in cut] + [clip_ph[-1][1]]
+    pieces = []
+    for k in range(0, len(src_bounds), 2):
+        s0, s1 = src_bounds[k], src_bounds[k + 1]
+        c0, c1 = clip_bounds[k], clip_bounds[k + 1]
+        if s1 - s0 < min_piece or c1 - c0 < min_piece:
+            return None
+        rate = (c1 - c0) / (s1 - s0)
+        if not (min_tempo <= rate <= max_tempo):
+            return None
+        pieces.append((s0, s1, c0, c1, rate))
+
+    out = np.zeros(int(round((end - onset) * sr)), dtype=np.float32)
+    for s0, s1, c0, c1, rate in pieces:
+        piece = audio[int(c0 * sr):int(np.ceil(c1 * sr))]
+        if abs(rate - 1.0) > SYNC_TOLERANCE:
+            piece = stretch_audio(piece, sr, rate)
+        a = int(round((s0 - onset) * sr))
+        n = min(int(round((s1 - s0) * sr)), len(out) - a)
+        if n <= 0:
+            continue
+        out[a:a + n] += _edge_fades(fit_length(piece, n, sr), sr)
+    return out, len(pieces)
+
+
+def assemble_synced(
+    segment_info: list[dict],
+    original_duration: float,
+    output_path: str,
+    *,
+    speech_map=None,
+    sample_rate: int = TARGET_SR,
+    max_tempo: float = SYNC_MAX_TEMPO,
+    min_tempo: float = SYNC_MIN_TEMPO,
+    vocals_path: str | None = None,
+    passthrough_max: float = PASSTHROUGH_MAX,
+    report_path: str | None = None,
+) -> str:
+    """Assemble segments so every line replaces the original speech exactly.
+
+    For each segment, the speech span it replaces is looked up in
+    *speech_map* (:func:`mazinger.speech.speech_spans`; without a map the
+    subtitle span is used).  The clip's own leading and trailing silence is
+    removed, it is stretched to the length of that span, padded or trimmed
+    to the exact sample count, and placed at the span's onset.  Clips that
+    cannot reach the target within ``[min_tempo, max_tempo]`` are stretched
+    to the limit (see :func:`sync_plan`).
+
+    The output has exactly ``round(original_duration * sample_rate)``
+    samples.  With *vocals_path* (the source's vocals stem), vocal activity
+    no line covers — laughs, breaths, short missed phrases up to
+    *passthrough_max* seconds — is copied from the original so it is not
+    lost from the dub.
+
+    A per-segment report is written as JSON to *report_path* (default:
+    beside *output_path*, ``<name>.sync.json``).
+    """
+    import json
+
+    from mazinger.speech import (
+        clip_regions, span_phrases, speech_spans, trust_unvoiced, uncovered_regions,
+    )
+
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+    sr = sample_rate
+    total = int(round(original_duration * sr))
+    timeline = np.zeros(total, dtype=np.float32)
+
+    segs = [s for s in segment_info if s.get("wav_path")]
+    spans = speech_spans([(s["start"], s["end"]) for s in segs], speech_map)
+    skip_unvoiced = speech_map is not None and trust_unvoiced(spans)
+    order = sorted(range(len(segs)), key=lambda i: spans[i].onset)
+    gap = SYNC_GAP
+
+    def prepare(k: int):
+        i = order[k]
+        seg, span = segs[i], spans[i]
+        if not span.voiced and skip_unvoiced:
+            return "unvoiced"  # no speech in the source here: an ASR hallucination
+        onset = min(span.onset, original_duration)
+        nxt = spans[order[k + 1]].onset - gap if k + 1 < len(order) else original_duration
+        room = max(0.0, min(nxt, original_duration) - onset)
+        raw = _load_and_resample(seg["wav_path"], sr)
+        regions = clip_regions(raw, sr)
+        i0 = max(0, int(regions[0][0] * sr))
+        i1 = min(len(raw), int(np.ceil(regions[-1][1] * sr)))
+        audio = raw[i0:i1]
+        natural = len(audio) / sr
+        if natural <= 0 or room <= 0:
+            return None
+        target = min(span.duration, room)
+        start = int(round(onset * sr))
+        base = {"idx": seg["idx"], "onset": round(onset, 3), "target": round(target, 3),
+                "natural": round(natural, 3), "voiced": span.voiced}
+
+        # A line over several original phrases: fit piece by piece, so the
+        # dub pauses where the speaker paused.
+        if speech_map is not None and span.voiced:
+            placed = _place_phrases(
+                audio, [(a - i0 / sr, b - i0 / sr) for a, b in regions],
+                span_phrases(speech_map, span), onset, onset + target, sr,
+                max_tempo=max_tempo, min_tempo=min_tempo,
+            )
+            if placed is not None:
+                audio, pieces = placed
+                return start, audio, {**base, "rate": round(natural / target, 4),
+                                      "placed": round(len(audio) / sr, 3),
+                                      "outcome": "phrased", "pieces": pieces, "trimmed": 0.0}
+
+        rate, length, outcome = sync_plan(natural, target, room,
+                                          max_tempo=max_tempo, min_tempo=min_tempo)
+        if rate != 1.0:
+            audio = stretch_audio(audio, sr, rate)
+        n = int(round(length * sr))
+        trimmed = 0.0
+        if outcome == "too_long" and len(audio) > n:
+            cut = _find_last_silence(audio, sr, n)
+            trimmed = (len(audio) - min(cut, n)) / sr
+            audio = audio[:min(cut, n)]
+        audio = _edge_fades(fit_length(audio, n, sr), sr)
+        return start, audio, {**base, "rate": round(rate, 4), "placed": round(len(audio) / sr, 3),
+                              "outcome": outcome, "trimmed": round(trimmed, 3)}
+
+    stats = {k: 0 for k in ("exact", "phrased", "sped_up", "slowed_down", "too_long",
+                            "too_short", "skipped", "unvoiced")}
+    report: list[dict] = []
+    workers = max(1, min(ASSEMBLE_WORKERS, len(order)))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        for result in tqdm(_ordered_map(pool, prepare, range(len(order)), window=4 * workers),
+                           total=len(order), desc="Syncing"):
+            if result is None or result == "unvoiced":
+                stats["skipped" if result is None else "unvoiced"] += 1
+                continue
+            start, audio, rec = result
+            end = min(start + len(audio), total)
+            timeline[start:end] += audio[:end - start]
+            stats[rec["outcome"]] += 1
+            report.append(rec)
+
+    kept = 0.0
+    if vocals_path and speech_map is not None and passthrough_max > 0 and os.path.isfile(vocals_path):
+        info = sf.info(vocals_path)
+        resampled = None  # decoded once, only when the stem is not at *sr*
+        for s0, s1 in uncovered_regions(speech_map, spans):
+            if s1 - s0 > passthrough_max:
+                continue
+            a, b = int(round(s0 * sr)), min(int(round(s1 * sr)), total)
+            if b <= a:
+                continue
+            if info.samplerate == sr:
+                clip, _ = sf.read(vocals_path, start=a, stop=b, dtype="float32", always_2d=True)
+                clip = clip.mean(axis=1)
+            else:
+                if resampled is None:
+                    resampled = _load_and_resample(vocals_path, sr)
+                clip = resampled[a:b]
+            clip = _edge_fades(clip[:b - a].copy(), sr, 20, 30)
+            timeline[a:a + len(clip)] += clip
+            kept += len(clip) / sr
+
+    peak = _peak_abs(timeline)
+    if peak > 1.0:
+        log.info("Normalising peak %.2f to 1.0", peak)
+        timeline /= peak
+    sf.write(output_path, timeline, sr)
+
+    dev = [abs(r["placed"] - r["target"]) / max(r["target"], 1e-3) for r in report]
+    summary = {
+        "duration": round(total / sr, 6),
+        "samples": total,
+        "segments": len(segs),
+        **stats,
+        "passthrough_seconds": round(kept, 2),
+        "mean_length_error": round(float(np.mean(dev)) if dev else 0.0, 4),
+        "max_length_error": round(float(np.max(dev)) if dev else 0.0, 4),
+    }
+    report_path = report_path or os.path.splitext(output_path)[0] + ".sync.json"
+    try:
+        with open(report_path, "w", encoding="utf-8") as fh:
+            json.dump({"summary": summary, "segments": report}, fh, indent=1)
+    except OSError as exc:
+        log.warning("Could not write the sync report: %s", exc)
+
+    log.info(
+        "Synced timeline: %.2fs | exact=%d phrased=%d sped_up=%d slowed=%d too_long=%d "
+        "too_short=%d skipped=%d unvoiced=%d | mean length error %.1f%% | kept %.1fs of "
+        "untranscribed vocals",
+        total / sr, stats["exact"], stats["phrased"], stats["sped_up"], stats["slowed_down"],
+        stats["too_long"], stats["too_short"], stats["skipped"], stats["unvoiced"],
+        summary["mean_length_error"] * 100, kept,
+    )
+    return output_path
+
+
+def force_length(path: str, samples: int) -> None:
+    """Pad or trim the audio file at *path* in place to exactly *samples* frames."""
+    info = sf.info(path)
+    if info.frames == samples:
+        return
+    data, sr = sf.read(path, dtype="float32", always_2d=True)
+    if len(data) > samples:
+        data = data[:samples]
+    else:
+        data = np.pad(data, ((0, samples - len(data)), (0, 0)))
+    sf.write(path, data, sr, subtype=info.subtype)
+
+
 def _loudness_or_none(path: str) -> float | None:
     """Integrated loudness (LUFS) of an audio file via ffmpeg, or ``None``."""
     result = subprocess.run(
@@ -588,11 +968,14 @@ def _unload_demucs(model: object, device: str) -> None:
         torch.cuda.empty_cache()
 
 
-def _demucs_background_block(
+def _demucs_stems_block(
     model, block: np.ndarray, sr: int, *,
-    device: str, segment: float | None, overlap: float,
-) -> np.ndarray:
-    """Separate one ``(samples, channels)`` block; return mono background at *sr*."""
+    device: str, segment: float | None, overlap: float, vocals: bool = True,
+) -> tuple[np.ndarray, np.ndarray | None]:
+    """Separate one ``(samples, channels)`` block; return mono ``(background, vocals)`` at *sr*.
+
+    With ``vocals=False`` the vocals stem is neither kept nor resampled (``None``).
+    """
     import torch
     import torchaudio
     from demucs.apply import apply_model
@@ -608,11 +991,26 @@ def _demucs_background_block(
     stems = sources[0].cpu().numpy()  # (stems, channels, samples)
     vocals_idx = model.sources.index("vocals")
     bg = (stems.sum(axis=0) - stems[vocals_idx]).mean(axis=0).astype(np.float32)
+    voc = stems[vocals_idx].mean(axis=0).astype(np.float32) if vocals else None
     if model.samplerate != sr:
         bg = torchaudio.functional.resample(
             torch.from_numpy(bg), model.samplerate, sr,
         ).numpy()
-    return bg
+        if voc is not None:
+            voc = torchaudio.functional.resample(
+                torch.from_numpy(voc), model.samplerate, sr,
+            ).numpy()
+    return bg, voc
+
+
+def _demucs_background_block(
+    model, block: np.ndarray, sr: int, *,
+    device: str, segment: float | None, overlap: float,
+) -> np.ndarray:
+    """Separate one ``(samples, channels)`` block; return mono background at *sr*."""
+    return _demucs_stems_block(
+        model, block, sr, device=device, segment=segment, overlap=overlap, vocals=False,
+    )[0]
 
 
 def _extract_background_demucs(
@@ -622,15 +1020,20 @@ def _extract_background_demucs(
     overlap: float = 0.25,
     block_sec: float = DEMUCS_BLOCK_SEC,
     context_sec: float = DEMUCS_CONTEXT_SEC,
+    vocals_path: str | None = None,
 ) -> None:
+    """Write the background stem to *out_path* (and the vocals stem to *vocals_path*)."""
     model, device = _load_demucs(device)
+    vocals_out = None
     try:
         total = get_audio_duration(audio_path)
         n_blocks = max(1, int(np.ceil(total / block_sec)))
         log.info(
-            "Extracting background with demucs on %s (%.0fs in %d block(s))",
-            device, total, n_blocks,
+            "Extracting background%s with demucs on %s (%.0fs in %d block(s))",
+            " and vocals" if vocals_path else "", device, total, n_blocks,
         )
+        if vocals_path:
+            vocals_out = sf.SoundFile(vocals_path, "w", samplerate=sr, channels=1, format="WAV")
         with sf.SoundFile(out_path, "w", samplerate=sr, channels=1, format="WAV") as out:
             for b in tqdm(range(n_blocks), desc="Separating", disable=n_blocks == 1):
                 core_start = b * block_sec
@@ -646,34 +1049,44 @@ def _extract_background_demucs(
                 )
                 if not len(block):
                     break
-                bg = _demucs_background_block(
-                    model, block, sr, device=device, segment=segment, overlap=overlap,
-                )
+                kw = dict(device=device, segment=segment, overlap=overlap)
+                if vocals_out is not None:
+                    stems = _demucs_stems_block(model, block, sr, **kw)
+                else:
+                    stems = (_demucs_background_block(model, block, sr, **kw),)
                 # Slice positions come from absolute times so rounding never
                 # accumulates across blocks.
                 offset = round(core_start * sr) - round(read_start * sr)
-                if is_last:
-                    core = bg[offset:]
-                else:
-                    n = round(core_end * sr) - round(core_start * sr)
-                    core = bg[offset:offset + n]
-                    if len(core) < n:
+                n = None if is_last else round(core_end * sr) - round(core_start * sr)
+                for stem, dest in zip(stems, (out, vocals_out)):
+                    core = stem[offset:] if n is None else stem[offset:offset + n]
+                    if n is not None and len(core) < n:
                         core = np.pad(core, (0, n - len(core)))
-                out.write(core)
+                    dest.write(core)
     finally:
+        if vocals_out is not None:
+            vocals_out.close()
         _unload_demucs(model, device)
 
 
-def _extract_background(audio_path: str, out_path: str, sr: int = TARGET_SR) -> str:
-    """Extract non-vocal background from *audio_path*.
+def _extract_stems(
+    audio_path: str, out_path: str, sr: int = TARGET_SR, *, vocals_path: str | None = None,
+) -> str:
+    """Write the background stem (and optionally the vocals stem); return the method used.
 
     Uses demucs (htdemucs model) for high-quality source separation, block
-    by block (see :data:`DEMUCS_BLOCK_SEC`) and on the GPU when available.
-    Falls back to spectral masking via librosa when demucs is unavailable.
+    by block (see :data:`DEMUCS_BLOCK_SEC`) and on the GPU when available;
+    returns ``"demucs"``.  Falls back to spectral masking via librosa when
+    demucs is unavailable and returns ``"hpss"`` — its vocals stem is the mix
+    minus the background, so it still carries some music.
     """
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
     try:
-        _extract_background_demucs(audio_path, out_path, sr)
+        if vocals_path:
+            _extract_background_demucs(audio_path, out_path, sr, vocals_path=vocals_path)
+        else:
+            _extract_background_demucs(audio_path, out_path, sr)
+        return "demucs"
     except Exception as exc:
         log.info("Demucs unavailable (%s), using spectral masking fallback", exc)
         import librosa
@@ -683,6 +1096,14 @@ def _extract_background(audio_path: str, out_path: str, sr: int = TARGET_SR) -> 
         mask = P / (H + P + 1e-10)
         bg = librosa.istft(S * mask, length=len(y))
         sf.write(out_path, bg, sr)
+        if vocals_path:
+            sf.write(vocals_path, y - bg, sr)
+        return "hpss"
+
+
+def _extract_background(audio_path: str, out_path: str, sr: int = TARGET_SR) -> str:
+    """Extract the non-vocal background of *audio_path* to *out_path* (see :func:`_extract_stems`)."""
+    _extract_stems(audio_path, out_path, sr)
     return out_path
 
 
@@ -729,6 +1150,55 @@ def extract_background_cached(
     return cache_path
 
 
+def _fresh(path: str, source: str) -> bool:
+    try:
+        return os.path.getsize(path) > 0 and os.path.getmtime(path) >= os.path.getmtime(source)
+    except OSError:
+        return False
+
+
+def extract_stems_cached(
+    audio_path: str,
+    background_path: str,
+    vocals_path: str,
+    sr: int = TARGET_SR,
+) -> tuple[str, str, str]:
+    """Background and vocals stems of *audio_path*, separated once and cached.
+
+    Both stems come from one separation pass and are reused while newer than
+    *audio_path*.  Returns ``(background_path, vocals_path, method)`` where
+    *method* is ``"demucs"`` or ``"hpss"`` (see :func:`_extract_stems`).
+    """
+    import json
+
+    meta_path = os.path.join(os.path.dirname(background_path) or ".", "stems.json")
+    method = None
+    try:
+        with open(meta_path, encoding="utf-8") as fh:
+            method = json.load(fh).get("method")
+    except (OSError, ValueError, AttributeError):
+        pass
+    if method and _fresh(background_path, audio_path) and _fresh(vocals_path, audio_path):
+        log.info("Reusing cached stems (%s): %s", method, os.path.dirname(background_path))
+        return background_path, vocals_path, method
+
+    pid = os.getpid()
+    tmp_bg = f"{os.path.splitext(background_path)[0]}.{pid}.part.wav"
+    tmp_vo = f"{os.path.splitext(vocals_path)[0]}.{pid}.part.wav"
+    try:
+        method = _extract_stems(audio_path, tmp_bg, sr, vocals_path=tmp_vo)
+        os.replace(tmp_bg, background_path)
+        os.replace(tmp_vo, vocals_path)
+    finally:
+        for tmp in (tmp_bg, tmp_vo):
+            if os.path.exists(tmp):
+                os.remove(tmp)
+    with open(meta_path, "w", encoding="utf-8") as fh:
+        json.dump({"method": method}, fh)
+    log.info("Stems cached (%s): %s, %s", method, background_path, vocals_path)
+    return background_path, vocals_path, method
+
+
 def post_process(
     dubbed_path: str,
     original_audio: str,
@@ -739,8 +1209,17 @@ def post_process(
     background_volume: float = 0.15,
     background_cache: str | None = None,
     loudness_cache: str | None = None,
+    voice_reference: str | None = None,
+    exact: bool = False,
 ) -> str:
     """Apply loudness normalisation and background audio mixing.
+
+    With ``exact=True`` (the ``sync`` tempo mode) the dub is treated as a
+    replacement voice track: it is matched to the loudness of
+    *voice_reference* (the original's vocals stem) when given, the
+    background is added at *background_volume* without amix's automatic
+    down-scaling, a limiter guards against clipping, and the output keeps
+    the exact sample count of *dubbed_path*.
 
     Parameters:
         dubbed_path:       Path to the assembled TTS audio.
@@ -757,7 +1236,11 @@ def post_process(
         loudness_cache:    JSON file keeping the loudness of *original_audio*
                            so later calls skip measuring it again (see
                            :func:`measure_loudness_cached`).
+        voice_reference:   Loudness reference for the dub instead of
+                           *original_audio* (exact mode only).
+        exact:             Replacement-voice mixing, see above.
     """
+    frames = sf.info(dubbed_path).frames if exact else None
     if not loudness_match and not mix_background:
         if dubbed_path != output_path:
             shutil.copy2(dubbed_path, output_path)
@@ -768,7 +1251,11 @@ def post_process(
 
     # -- loudness matching ------------------------------------------------
     if loudness_match:
-        if loudness_cache:
+        if exact and voice_reference and os.path.isfile(voice_reference):
+            target_lufs = measure_loudness_cached(
+                voice_reference, os.path.splitext(voice_reference)[0] + ".loudness.json",
+            )
+        elif loudness_cache:
             target_lufs = measure_loudness_cached(original_audio, loudness_cache)
         else:
             target_lufs = _measure_loudness(original_audio)
@@ -794,17 +1281,38 @@ def post_process(
 
         dur_dub = get_audio_duration(work)
         mix_path = output_path + ".mix.wav"
-        filt = (
-            f"[1:a]atrim=0:{dur_dub:.3f},asetpts=PTS-STARTPTS,"
-            f"volume={background_volume:.2f}[bg];"
-            f"[0:a][bg]amix=inputs=2:duration=first:weights=1 {background_volume:.2f}[out]"
-        )
-        subprocess.run(
-            ["ffmpeg", "-y", "-i", work, "-i", bg_path,
-             "-filter_complex", filt, "-map", "[out]",
-             "-ar", str(TARGET_SR), "-ac", "1", mix_path],
-            capture_output=True, check=True,
-        )
+        if exact:
+            base = (
+                f"[1:a]atrim=0:{dur_dub:.6f},asetpts=PTS-STARTPTS,"
+                f"volume={background_volume:.3f}[bg];"
+                f"[0:a][bg]amix=inputs=2:duration=first:normalize=0"
+            )
+            # alimiter's latency compensation (ffmpeg 5+) keeps the voice on
+            # its onsets; older builds get a plain peak normalise instead.
+            filters = [base + ",alimiter=limit=0.97:level=0:latency=1[out]", base + "[out]"]
+        else:
+            filters = [(
+                f"[1:a]atrim=0:{dur_dub:.3f},asetpts=PTS-STARTPTS,"
+                f"volume={background_volume:.2f}[bg];"
+                f"[0:a][bg]amix=inputs=2:duration=first:weights=1 {background_volume:.2f}[out]"
+            )]
+        for n, filt in enumerate(filters, 1):
+            try:
+                subprocess.run(
+                    ["ffmpeg", "-y", "-i", work, "-i", bg_path,
+                     "-filter_complex", filt, "-map", "[out]",
+                     "-ar", str(TARGET_SR), "-ac", "1", mix_path],
+                    capture_output=True, check=True,
+                )
+                break
+            except subprocess.CalledProcessError:
+                if n == len(filters):
+                    raise
+        if exact and n > 1:
+            data, rate = sf.read(mix_path, dtype="float32")
+            peak = _peak_abs(data)
+            if peak > 0.97:
+                sf.write(mix_path, data * (0.97 / peak), rate)
         work = mix_path
         log.info("Mixed background at volume %.0f%%", background_volume * 100)
 
@@ -818,6 +1326,8 @@ def post_process(
         if os.path.exists(tmp) and tmp != output_path:
             os.remove(tmp)
 
+    if frames is not None:
+        force_length(output_path, frames)
     return output_path
 
 

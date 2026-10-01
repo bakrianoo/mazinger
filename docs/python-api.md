@@ -58,18 +58,21 @@ proj = dubber.dub(
     skip_existing=True,               # bool — skip stages with existing output
     force_reset=False,                # bool — delete cache and re-run everything
     use_resegmented=False,            # bool — use resegmented SRT for TTS input
-    tempo_mode="auto",                # str — "auto", "dynamic", "fixed", "off"
+    tempo_mode="sync",                # str — "sync" (exact fit to the original speech),
+                                      #       "auto", "dynamic", "fixed", "off"
     fixed_tempo=None,                 # float — constant speed multiplier
-    max_tempo=1.5,                    # float — speed-up cap for auto/dynamic
+    max_tempo=1.5,                    # float — speed-up cap
+    min_tempo=0.8,                    # float — slow-down floor in sync mode
     words_per_second=None,            # float — speech rate for word budgets (auto-estimated)
-    duration_budget=None,             # float — fraction of time for speech (default: 0.85)
+    duration_budget=None,             # float — fraction of time for speech (0.85; sync: 0.95)
     translate_technical_terms=False,   # bool — translate tech terms vs. keep in English
     asr_review=False,                  # bool — review ASR transcript (fix typos, punctuation)
     keep_technical_english=False,      # bool — convert technical terms to English (requires asr_review)
     use_youtube_subs=False,            # bool — download YouTube captions and compare with ASR
     loudness_match=True,              # bool — normalise dubbed loudness to original
     mix_background=True,              # bool — mix original background audio under dub
-    background_volume=0.15,           # float — background layer gain (0.0–1.0)
+    background_volume=None,           # float — background layer gain (0.0–1.0);
+                                      #         None: 1.0 in sync mode with Demucs, else 0.15
     output_type="audio",              # str — "audio" (WAV) or "video" (MP4)
     subtitle_style=None,              # SubtitleStyle — styling for burned subtitles
     subtitle_source="translated",     # str — "translated", "original", or file path
@@ -445,6 +448,21 @@ assemble_timeline(segments, duration, "dubbed.wav", tempo_mode="fixed", fixed_te
 # Dynamic tempo
 assemble_timeline(segments, duration, "dubbed.wav", tempo_mode="dynamic", max_tempo=1.3)
 
+# Exact sync: fit every line to the original speech it replaces
+from mazinger.speech import build_speech_map, line_targets
+smap = build_speech_map("audio.mp3", "speech_map.json", vocals_path="vocals.wav")
+targets, unvoiced = line_targets(entries, smap)     # seconds per line; lines with no speech
+segments = tts.synthesize_segments(model, wrapper, entries, "./segments", targets=targets)
+assemble_timeline(segments, smap.duration, "dubbed.wav", tempo_mode="sync",
+                  speech_map=smap, vocals_path="vocals.wav")
+post_process("dubbed.wav", "audio.mp3", "dubbed_final.wav",
+             background_volume=1.0, voice_reference="vocals.wav", exact=True)
+
+# Background and vocals stems from one Demucs pass, cached
+from mazinger.assemble import extract_stems_cached
+bg, vocals, method = extract_stems_cached(
+    "audio.mp3", proj.background_audio(), proj.vocals_audio())
+
 # Mux audio into video
 mux_video("video.mp4", "dubbed.wav", "dubbed.mp4")
 
@@ -464,6 +482,12 @@ post_process(
     loudness_cache=proj.source_loudness,
 )
 ```
+
+In `sync` mode, `assemble_timeline` also writes a per-line report beside the
+output (`dubbed.sync.json`: onset, target, natural and placed length, stretch
+rate and outcome of every line), and `python -m mazinger.testing.bench_sync
+SOURCE DUB_VOICE SRT` measures a finished dub's timing against its source
+(onset error, length ratio, speech overlap, total length difference).
 
 `assemble_timeline` prepares segments (load, tempo change, trim) on
 `assemble.ASSEMBLE_WORKERS` threads (at most 8) and places them in order, so

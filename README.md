@@ -38,6 +38,8 @@ mazinger web --with-ollama --with-coherex
 
 A local URL opens in your browser. Paste a video link, pick a voice, and click **Start**. To process several videos in one go, put one URL or local path per line (or upload several files); they run one after another with a progress bar. The flags install a free local LLM (Ollama) and pre-download **CohereX**, the transcription backend Studio defaults to — no API keys required.
 
+> **Want to script it?** Click **🧾 Show CLI command** next to **Start** to get the `mazinger dub` command that runs the same job with the same settings.
+
 > **No Hugging Face account?** CohereX's weights are gated, so swap in `--with-faster-whisper` and pick **Faster Whisper** in the UI — it needs no sign-in and covers any language.
 
 > The flags only move the wait to launch time: if you run plain `mazinger web`, Studio installs Ollama and pulls the model by itself the first time you start a mission with the **Ollama (Local — Free)** provider. Set `OLLAMA_HOST` to use an Ollama server running elsewhere.
@@ -207,6 +209,8 @@ Full reference: [Python API](docs/python-api.md).
 ## 🔧 How It Works
 
 Mazinger chains ten resumable stages: **Download → Transcribe → Thumbnails → Describe → Review → Translate → Re-segment → Speak → Assemble → Subtitle**. Every stage runs standalone or as part of the full pipeline; completed stages and individual TTS segments are cached and skipped on re-runs.
+
+By default the dub is **in sync with the original speech**, not just with the subtitles: a speech map of the source (voice-activity detection on the Demucs vocals stem) gives every line the exact span of speech it replaces. Each dubbed line is fitted to that length, starts where the original started, and pauses where the speaker paused. The output is exactly as long as the source, the original music and effects stay at their own level, and short sounds nobody transcribed (laughs, breaths) are kept. Pass `--tempo-mode auto` for the earlier subtitle-slot timing.
 
 See the [Pipeline Overview](docs/pipeline.md) for a diagram and the data flow between stages.
 

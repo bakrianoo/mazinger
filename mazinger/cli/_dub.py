@@ -22,6 +22,18 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     add_llm(p)
     add_slice(p)
     p.add_argument("--device", default="auto", help="Device: auto (default), cuda, or cpu.")
+    p.add_argument("--dtype", default="bfloat16", choices=["bfloat16", "float16", "float32"],
+                   help="Weight dtype for the Qwen3-TTS model (default: bfloat16).")
+    p.add_argument("--llm-instructions", default=None,
+                   help="Extra instructions added to the system prompt of every LLM task "
+                        "(thumbnails, content analysis, ASR review, translation, re-segmentation).")
+    p.add_argument("--user-instructions", default="",
+                   help="Content and translation guidance passed to content analysis "
+                        "and translation (e.g. 'Keep culinary terms in Italian').")
+    p.add_argument("--translation-model", default=None,
+                   help="Translate each subtitle on its own with this model (e.g. the "
+                        "'translategemma' Ollama model). Skips visual context and duration "
+                        "budgeting.")
     p.add_argument("--use-resegmented", action="store_true",
                    help="Translate from the resegmented SRT instead of the raw transcript.")
     p.add_argument("--output-type", choices=["audio", "video"], default="audio",
@@ -42,10 +54,14 @@ def register(subparsers: argparse._SubParsersAction) -> None:
                    help="Speed-up above which a dubbed line is rewritten shorter (default: 1.15).")
     p.add_argument("--no-loudness-match", action="store_true",
                    help="Skip loudness normalisation against the original audio.")
-    p.add_argument("--mix-background", action="store_true", default=False,
-                   help="Extract and mix background audio from the original.")
-    p.add_argument("--background-volume", type=float, default=0.15,
-                   help="Background audio mix level, 0.0-1.0 (default: 0.15).")
+    p.add_argument("--mix-background", action="store_true", default=None,
+                   help="Extract and mix background audio from the original "
+                        "(default: on in sync mode, off otherwise).")
+    p.add_argument("--no-mix-background", action="store_false", dest="mix_background",
+                   help="Do not mix the original background under the dub.")
+    p.add_argument("--background-volume", type=float, default=None,
+                   help="Background audio mix level, 0.0-1.0 (default: 1.0 — the original "
+                        "level — in sync mode with Demucs, else 0.15).")
     p.add_argument("--force-reset", action="store_true",
                    help="Discard all cached outputs and re-run every stage.")
     add_common(p)
@@ -56,9 +72,11 @@ def handler(args: argparse.Namespace) -> None:
     from mazinger.cli._groups import resolve_device
 
     args.device = resolve_device(args.device)
-    voice_sample, voice_script = resolve_voice(args)
+    voice_sample, voice_script = resolve_voice(args, theme=False)
     voice_theme = getattr(args, "voice_theme", None)
     subtitle_style = subtitle_style_from_args(args) if args.embed_subtitles else None
+    tempo_mode = tempo_mode_from_args(args)
+    mix_background = args.mix_background if args.mix_background is not None else tempo_mode == "sync"
 
     dubber = MazingerDubber(
         openai_api_key=args.openai_api_key,
@@ -66,6 +84,7 @@ def handler(args: argparse.Namespace) -> None:
         llm_model=args.llm_model,
         base_dir=args.base_dir,
         llm_think=args.llm_think,
+        llm_instructions=args.llm_instructions,
     )
     proj = dubber.dub(
         source=args.source,
@@ -79,6 +98,7 @@ def handler(args: argparse.Namespace) -> None:
         mlx_whisper_model=args.mlx_whisper_model,
         beam_size=args.beam_size,
         tts_model_name=args.tts_model,
+        tts_dtype=args.dtype,
         tts_language=args.tts_language,
         tts_engine=args.tts_engine,
         mlx_model=args.mlx_tts_model,
@@ -102,9 +122,10 @@ def handler(args: argparse.Namespace) -> None:
         min_segment_duration=args.min_segment_duration,
         max_segment_duration=args.max_segment_duration,
         output_type=args.output_type,
-        tempo_mode=tempo_mode_from_args(args),
+        tempo_mode=tempo_mode,
         fixed_tempo=args.fixed_tempo,
         max_tempo=args.max_tempo,
+        min_tempo=args.min_tempo,
         fit_check=not args.no_fit_check,
         fit_max_ratio=args.fit_max_ratio,
         words_per_second=args.words_per_second,
@@ -113,10 +134,12 @@ def handler(args: argparse.Namespace) -> None:
         asr_review=args.asr_review,
         keep_technical_english=args.keep_technical_english,
         use_youtube_subs=args.youtube_subs,
+        translation_model=args.translation_model,
+        user_instructions=args.user_instructions,
         subtitle_style=subtitle_style,
         subtitle_source=args.subtitle_source,
         loudness_match=not args.no_loudness_match,
-        mix_background=args.mix_background,
+        mix_background=mix_background,
         background_volume=args.background_volume,
     )
     print(proj.summary())

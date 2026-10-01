@@ -2117,6 +2117,7 @@ class Qwen3TTSForConditionalGeneration(Qwen3TTSPreTrainedModel, GenerationMixin)
         subtalker_temperature: float = 0.9,
         eos_token_id: Optional[int] = None,
         repetition_penalty: float = 1.05,
+        logits_processor=None,
         **kwargs,
     ):
         talker_kwargs = {
@@ -2142,7 +2143,11 @@ class Qwen3TTSForConditionalGeneration(Qwen3TTSPreTrainedModel, GenerationMixin)
             "output_hidden_states": getattr(kwargs, "output_hidden_states", True),
             "return_dict_in_generate": getattr(kwargs, "return_dict_in_generate", True)
         }
-        
+        # [mazinger] Forward a caller's LogitsProcessorList to the talker so
+        # the length of each clip can be steered through the codec EOS token.
+        if logits_processor is not None:
+            talker_kwargs["logits_processor"] = logits_processor
+
         talker_input_embeds = [[] for _ in range(len(input_ids))]
 
         voice_clone_spk_embeds = None

@@ -123,11 +123,23 @@ def ensure_transcription(proj, args: argparse.Namespace) -> None:
     )
 
 
+#: Languages the TTS engines speak under a name the translation list does not
+#: use.  Studio offers them, so the CLI accepts them too.
+_TTS_LANGUAGE_NAMES = ("Chinese", "Cantonese")
+
+
+def _tts_language_name(value: str) -> str | None:
+    return next((n for n in _TTS_LANGUAGE_NAMES if n.lower() == value.lower()), None)
+
+
 def _language_type(value: str) -> str:
     from mazinger.translate import resolve_language
     try:
         return resolve_language(value)
     except ValueError as exc:
+        name = _tts_language_name(value)
+        if name:
+            return name
         raise argparse.ArgumentTypeError(str(exc)) from None
 
 
@@ -136,6 +148,9 @@ def _source_language_type(value: str) -> str:
     try:
         return resolve_source_language(value)
     except ValueError as exc:
+        name = _tts_language_name(value)
+        if name:
+            return name
         raise argparse.ArgumentTypeError(str(exc)) from None
 
 
@@ -180,7 +195,8 @@ def add_voice(p: argparse.ArgumentParser) -> None:
              "Uses Qwen VoiceDesign to generate a reference voice in the target language.",
     )
     p.add_argument("--voice-sample", default=None, help="Path to voice reference audio.")
-    p.add_argument("--voice-script", default=None, help="Path to voice reference transcript.")
+    p.add_argument("--voice-script", default=None,
+                   help="Voice reference transcript: a text file, or the transcript itself.")
 
 
 def add_tts_engine(p: argparse.ArgumentParser) -> None:
@@ -202,12 +218,21 @@ def add_tts_engine(p: argparse.ArgumentParser) -> None:
 
 
 def add_tempo(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--tempo-mode", choices=["sync", "auto", "dynamic", "fixed", "off"],
+                   default=None,
+                   help="How dubbed lines are timed. 'sync' (default): fit each line to the "
+                        "length of the original speech it replaces, place it at its onset, and "
+                        "keep the output exactly as long as the source. 'auto'/'dynamic': "
+                        "fit lines to their subtitle slots. 'fixed': one tempo for all "
+                        "(--fixed-tempo). 'off': no tempo change.")
     p.add_argument("--dynamic-tempo", action="store_true",
-                   help="Enable per-segment dynamic tempo adjustment.")
+                   help="Same as --tempo-mode dynamic.")
     p.add_argument("--fixed-tempo", type=float, default=None,
                    help="Apply a fixed tempo rate to all segments (e.g. 1.1). Overrides --dynamic-tempo.")
     p.add_argument("--max-tempo", type=float, default=1.5,
-                   help="Maximum speed-up factor for dynamic tempo (default: 1.5).")
+                   help="Maximum speed-up factor (default: 1.5).")
+    p.add_argument("--min-tempo", type=float, default=0.8,
+                   help="Slowest a line is stretched in sync mode (default: 0.8).")
 
 
 def add_segment_mode(p: argparse.ArgumentParser) -> None:
@@ -289,7 +314,15 @@ def add_translation(p: argparse.ArgumentParser) -> None:
                         "When omitted, technical terms are kept in their original language.")
 
 
-def resolve_voice(args: argparse.Namespace) -> tuple[str | None, str | None]:
+def resolve_voice(
+    args: argparse.Namespace, *, theme: bool = True,
+) -> tuple[str | None, str | None]:
+    """Resolve the voice flags to ``(sample, script)``.
+
+    With ``theme=False`` a ``--voice-theme`` is left for the caller: ``dub``
+    hands it to :meth:`MazingerDubber.dub`, which keeps the generated voice in
+    the project and uses OmniVoice's own voice design, as Studio does.
+    """
     voice_sample = args.voice_sample
     voice_script = args.voice_script
     if args.clone_profile:
@@ -297,7 +330,7 @@ def resolve_voice(args: argparse.Namespace) -> tuple[str | None, str | None]:
         pv, ps = fetch_profile(args.clone_profile)
         voice_sample = voice_sample or pv
         voice_script = voice_script or ps
-    if getattr(args, "voice_theme", None) and not (voice_sample and voice_script):
+    if theme and getattr(args, "voice_theme", None) and not (voice_sample and voice_script):
         from mazinger.profiles import resolve_theme
         language = getattr(args, "tts_language", None) or getattr(args, "target_language", "English")
         device = getattr(args, "device", "cuda:0")
@@ -327,11 +360,14 @@ def make_llm_client(args: argparse.Namespace):
 
 
 def tempo_mode_from_args(args: argparse.Namespace) -> str:
+    mode = getattr(args, "tempo_mode", None)
+    if mode:
+        return mode
     if args.fixed_tempo:
         return "fixed"
     if args.dynamic_tempo:
         return "dynamic"
-    return "auto"
+    return "sync"
 
 
 def add_subtitle_style(p: argparse.ArgumentParser) -> None:

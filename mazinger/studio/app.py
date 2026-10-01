@@ -16,6 +16,7 @@ from mazinger.studio.helpers import (
     HF_MODEL_LINKS_INLINE,
 )
 from mazinger.studio.pipeline import run_dubbing, render_video, check_llm_connection
+from mazinger.studio.cli_command import build_cli_command
 from mazinger.studio import editor_ui
 
 # Players load segment WAVs and clips straight from the project folders.
@@ -424,9 +425,15 @@ with gr.Blocks(title="Mazinger Studio", theme=theme, css=CSS) as app:
 
                     with gr.Tab("🔊 Audio"):
                         tempo_mode = gr.Dropdown(
-                            ["Auto", "Off", "Dynamic", "Fixed"],
-                            value="Auto",
+                            ["Sync", "Auto", "Off", "Dynamic", "Fixed"],
+                            value="Sync",
                             label="Tempo mode",
+                            info=(
+                                "Sync: each line is fitted to the length of the original "
+                                "speech it replaces and starts where it started; the dub "
+                                "is exactly as long as the source. Auto: lines are fitted "
+                                "to their subtitle slots."
+                            ),
                         )
                         max_tempo = gr.Slider(
                             1.0, 2.0, value=1.5, step=0.05,
@@ -454,11 +461,19 @@ with gr.Blocks(title="Mazinger Studio", theme=theme, css=CSS) as app:
                             )
                             mix_background = gr.Checkbox(
                                 label="Mix background audio",
-                                value=False,
+                                value=True,
                             )
                         background_volume = gr.Slider(
-                            0.0, 1.0, value=0.15, step=0.05,
+                            0.0, 1.0, value=1.0, step=0.05,
                             label="Background volume",
+                            info="Sync keeps the original music and effects at 1.0 (their "
+                                 "own level); the other modes mix them lower.",
+                        )
+                        # Sync replaces only the voice, so the background belongs
+                        # at its original level; the slot modes mix it under.
+                        tempo_mode.change(
+                            lambda mode: gr.update(value=1.0 if mode == "Sync" else 0.15),
+                            tempo_mode, background_volume,
                         )
 
                     with gr.Tab("📥 Download"):
@@ -504,12 +519,30 @@ with gr.Blocks(title="Mazinger Studio", theme=theme, css=CSS) as app:
             gr.HTML('<hr class="divider">')
 
             # ── Run Button ────────────────────────────────────────────────
-            run_btn = gr.Button(
-                "🎬  Start",
-                variant="primary",
-                size="lg",
-                elem_classes="run-btn",
-            )
+            with gr.Row(equal_height=True):
+                run_btn = gr.Button(
+                    "🎬  Start",
+                    variant="primary",
+                    size="lg",
+                    elem_classes="run-btn",
+                    scale=4,
+                )
+                cli_btn = gr.Button(
+                    "🧾  Show CLI command",
+                    variant="secondary",
+                    size="lg",
+                    scale=1,
+                )
+
+            # ── CLI command (filled by "Show CLI command") ────────────────
+            with gr.Accordion("🧾 CLI command", open=True, visible=False) as cli_section:
+                gr.Markdown(
+                    "Runs the same job from a terminal with the settings above. "
+                    "Nothing has been started.",
+                    elem_classes="openai-info",
+                )
+                cli_code = gr.Code(label="Command", language="shell", interactive=False)
+                cli_notes = gr.Markdown("")
 
             # ── Status & Logs ─────────────────────────────────────────────
             # Filled only when several sources run as a batch.
@@ -667,29 +700,46 @@ with gr.Blocks(title="Mazinger Studio", theme=theme, css=CSS) as app:
             )
 
             # ── Wire everything ───────────────────────────────────────────
+            # In run_dubbing's (and build_cli_command's) parameter order.
+            dub_inputs = [
+                source_type, url_input, file_input, local_path_input,
+                cookies_text,
+                target_language, voice_type, voice_theme, voice_preset,
+                voice_file, voice_script_text,
+                llm_provider, ollama_model, openai_key,
+                api_base_url, llm_model,
+                quality, start_time, end_time,
+                transcribe_method, whisper_model,
+                source_language, words_per_second, duration_budget, translate_technical,
+                use_translation_model,
+                tts_engine,
+                tts_dtype,
+                tempo_mode, max_tempo, segment_mode, loudness_match, mix_background, background_volume,
+                output_type, force_reset,
+                stream_llm,
+                youtube_subs,
+                user_instructions,
+                llm_instructions,
+                fit_check,
+            ]
+
+            def _show_cli_command(*settings):
+                script, notes = build_cli_command(*settings)
+                return (
+                    gr.update(visible=True, open=True),
+                    gr.update(value=script, visible=bool(script)),
+                    "\n".join(f"- {n}" for n in notes),
+                )
+
+            cli_btn.click(
+                fn=_show_cli_command,
+                inputs=dub_inputs,
+                outputs=[cli_section, cli_code, cli_notes],
+            )
+
             run_btn.click(
                 fn=run_dubbing,
-                inputs=[
-                    source_type, url_input, file_input, local_path_input,
-                    cookies_text,
-                    target_language, voice_type, voice_theme, voice_preset,
-                    voice_file, voice_script_text,
-                    llm_provider, ollama_model, openai_key,
-                    api_base_url, llm_model,
-                    quality, start_time, end_time,
-                    transcribe_method, whisper_model,
-                    source_language, words_per_second, duration_budget, translate_technical,
-                    use_translation_model,
-                    tts_engine,
-                    tts_dtype,
-                    tempo_mode, max_tempo, segment_mode, loudness_match, mix_background, background_volume,
-                    output_type, force_reset,
-                    stream_llm,
-                    youtube_subs,
-                    user_instructions,
-                    llm_instructions,
-                    fit_check,
-                ],
+                inputs=dub_inputs,
                 outputs=[status, logs, llm_stream_box, audio_output, srt_output, render_state,
                          batch_progress],
             ).then(
